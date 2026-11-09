@@ -370,8 +370,11 @@ public final class TtfTextRenderer {
 
 		float u0 = Math.max(0.0F, Math.min(1.0F, x0 * guiToScreen / screenWidth));
 		float u1 = Math.max(0.0F, Math.min(1.0F, x1 * guiToScreen / screenWidth));
-		float v0 = Math.max(0.0F, Math.min(1.0F, y0 * guiToScreen / screenHeight));
-		float v1 = Math.max(0.0F, Math.min(1.0F, y1 * guiToScreen / screenHeight));
+
+		// The render target's texture has its origin at the bottom-left while screen y grows
+		// downwards, so v has to be mirrored or the captured frame shows up upside down.
+		float v0 = 1.0F - Math.max(0.0F, Math.min(1.0F, y0 * guiToScreen / screenHeight));
+		float v1 = 1.0F - Math.max(0.0F, Math.min(1.0F, y1 * guiToScreen / screenHeight));
 
 		graphics.blit(BackdropBlur.view(), BackdropBlur.sampler(), x0, y0, x1, y1, u0, u1, v0, v1);
 	}
