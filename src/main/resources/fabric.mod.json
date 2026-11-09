@@ -16,6 +16,9 @@
 		],
 		"client": [
 			"com.ohmyf3.client.OhMyF3Client"
+		],
+		"modmenu": [
+			"com.ohmyf3.client.ModMenuIntegration"
 		]
 	},
 	"mixins": [
@@ -29,5 +32,8 @@
 		"minecraft": "~26.3",
 		"java": ">=25",
 		"fabric-api": "*"
+	},
+	"suggests": {
+		"modmenu": "*"
 	}
 }

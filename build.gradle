@@ -11,6 +11,14 @@ base {
 }
 
 repositories {
+	// ModMenu's config-screen API is compile-only: the entry point is only read when it is present.
+	maven {
+		name = "Terraformers"
+		url = "https://maven.terraformersmc.com/releases/"
+		content {
+			includeGroup "com.terraformersmc"
+		}
+	}
 	// Add repositories to retrieve artifacts from in here.
 	// You should only use this when depending on other mods because
 	// Loom adds the essential maven repositories to download Minecraft and libraries from automatically.
@@ -42,6 +50,9 @@ dependencies {
 
 	// Fabric API. This is technically optional, but you probably want it anyway.
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+
+	// Compile-time only: ModMenu instantiates the entry point when the mod is installed.
+	compileOnly "com.terraformersmc:modmenu:${project.modmenu_version}"
 
 	// Sodium, for the development client only: this mod never compiles against it.
 	// Loom 1.19 no longer provides modRuntimeOnly/modLocalRuntime, and dev mods are
@@ -95,6 +106,14 @@ publishing {
 	}
 
 	repositories {
+	// ModMenu's config-screen API is compile-only: the entry point is only read when it is present.
+	maven {
+		name = "Terraformers"
+		url = "https://maven.terraformersmc.com/releases/"
+		content {
+			includeGroup "com.terraformersmc"
+		}
+	}
 		// Add repositories to publish to here.
 	}
 }

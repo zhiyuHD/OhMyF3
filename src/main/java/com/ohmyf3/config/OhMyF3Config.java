@@ -1,5 +1,8 @@
 package com.ohmyf3.config;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
@@ -35,6 +38,12 @@ public final class OhMyF3Config {
 
 	/** Slide the columns in when F3 opens. */
 	public boolean slideAnimation = true;
+
+	/**
+	 * Per-part offsets for the settings screen, keyed by part name ({@code header},
+	 * {@code appearance}, {@code effects}, {@code footer}). Missing entries mean "default".
+	 */
+	public Map<String, int[]> layout = new LinkedHashMap<>();
 
 	public static OhMyF3Config get() {
 		if (instance == null) {
@@ -72,6 +81,28 @@ public final class OhMyF3Config {
 		} catch (IOException e) {
 			// Not worth crashing over; the setting just will not persist.
 		}
+	}
+
+	/** Offset of a layout part, in GUI pixels; {@code {0, 0}} when it was never moved. */
+	public int[] offset(String key) {
+		int[] value = layout == null ? null : layout.get(key);
+		return value != null && value.length == 2 ? value : new int[] {0, 0};
+	}
+
+	/** Moves a part and persists immediately. */
+	public void move(String key, int x, int y) {
+		if (layout == null) {
+			layout = new LinkedHashMap<>();
+		}
+
+		layout.put(key, new int[] {x, y});
+		save();
+	}
+
+	/** Puts every part back where it started. */
+	public void resetLayout() {
+		layout = new LinkedHashMap<>();
+		save();
 	}
 
 	/** Replaces the singleton, used by tests and by the settings screen after edits. */

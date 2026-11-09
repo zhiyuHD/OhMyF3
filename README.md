@@ -25,6 +25,7 @@ Written for Minecraft **26.3** on **Fabric**. Client-side only; it changes nothi
 | 🫧 **Blurred backdrop** | The world behind the cards is blurred using the engine's own blur chain, run over a copy of the frame — so only the card areas are blurred, not the whole screen. |
 | 🎬 **Animation** | The two columns slide in and out. It's a single retargetable value, so pressing F3 mid-animation reverses from where it is instead of snapping. |
 | 📊 **Profiler pie** | The F3+L hotspot chart is a flat 2D pie with supersampled edges and every slice labelled in the system font — vanilla draws it extruded and per-scanline, with the text only in a legend beside it. |
+| 🎛 **Material 3 settings** | The settings screen is rebuilt from Material 3 pieces — tonal surfaces, rounded shapes, M3 switches — and every section can be dragged to a new position, with one click to restore the default layout. Works with **ModMenu** when it is installed. |
 | 🀄 **Chinese labels** | Field names can be shown in Chinese (`坐标`, `区块`, `光照` …), toggled in the settings screen. |
 | 🔌 **Mod rows** | Lines added by other mods are drawn with the same style, and detected by the *owning entry's namespace* rather than a hard-coded name list. |
 
