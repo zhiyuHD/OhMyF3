@@ -15,6 +15,9 @@ import com.ohmyf3.config.OhMyF3Config;
 public final class PieLayout {
 	public static final String KEY = "pie";
 
+	/** Legend height guessed before the chart has ever been drawn: five 9px rows. */
+	private static final int DEFAULT_LEGEND_HEIGHT = 45;
+
 	/** Default centre of the pie, in GUI pixels; filled in the first time vanilla draws it. */
 	private static volatile int[] defaultCentre;
 
@@ -47,8 +50,13 @@ public final class PieLayout {
 		int[] stored = OhMyF3Config.get().position(KEY);
 
 		if (stored == null) {
-			return defaultCentre == null ? new int[] {guiWidth - 140, guiHeight - 200}
-					: new int[] {defaultCentre[0], defaultCentre[1]};
+			if (defaultCentre != null) {
+				return new int[] {defaultCentre[0], defaultCentre[1]};
+			}
+
+			// Vanilla has not drawn the chart yet this session, so reproduce its layout:
+			// centreX = width - 140; centreY = height - bottomOffset(10) - 5 - legend - 67.
+			return new int[] {guiWidth - 140, guiHeight - 10 - 5 - DEFAULT_LEGEND_HEIGHT - 67};
 		}
 
 		return new int[] {Math.round(stored[0] * guiWidth / 1000.0F),

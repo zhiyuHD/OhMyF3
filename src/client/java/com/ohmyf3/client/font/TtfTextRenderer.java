@@ -156,6 +156,16 @@ public final class TtfTextRenderer {
 		return sampler;
 	}
 
+	/**
+	 * Width of the card the overlay last drew for a column.
+	 *
+	 * <p>The layout editor places the column's default anchor with this rather than with its sample
+	 * card, so the dummy overlay lines up with the real one instead of with the mock content.
+	 */
+	public static int lastCardWidth(boolean alignLeft) {
+		return alignLeft ? lastLeftCardWidth : lastRightCardWidth;
+	}
+
 	public static int lineHeight() {
 		return lineHeight;
 	}

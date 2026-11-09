@@ -219,10 +219,6 @@ public final class SettingsScreen extends Screen {
 	private void renderLayoutEditor(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
 		graphics.fill(0, 0, this.width, this.height, 0x8C000000);
 
-		TtfTextRenderer.drawString(graphics, "拖动组件调整 F3 布局（位置按屏幕比例保存）", 12, 24, M3.ON_SURFACE);
-		TtfTextRenderer.drawString(graphics, "拖标题条移动整列，拖某一行可单独摆放，拖饼图连背景一起移动", 12, 40,
-				M3.ON_SURFACE_VARIANT_BRIGHT);
-
 		List<Target> targets = targets(graphics);
 		lastTargets = targets;
 
@@ -240,6 +236,14 @@ public final class SettingsScreen extends Screen {
 		int barX = this.width / 2 - barWidth / 2;
 		int barY = this.height - 44;
 		Shapes.filled(graphics, barX - 10, barY - 8, barWidth + 20, 48, M3.RADIUS_EXTRA_LARGE, M3.SURFACE);
+
+		// Instructions live above the bar, where the dummy overlay never reaches.
+		String hint = "拖标题条移动整列 · 拖单行可单独摆放 · 拖饼图连背景一起移动";
+		int hintWidth = TtfTextRenderer.stringWidth(hint);
+		Shapes.filled(graphics, this.width / 2 - hintWidth / 2 - 8, barY - 26, hintWidth + 16, 16, 8,
+				Anim.alpha(M3.SURFACE, 0.85F));
+		TtfTextRenderer.drawString(graphics, hint, (this.width - hintWidth) / 2.0F, barY - 14,
+				M3.ON_SURFACE_VARIANT_BRIGHT);
 
 		buttons.clear();
 		buttons.add(new Button("done", "完成", barX, barY, 80, 32, true));
@@ -293,17 +297,23 @@ public final class SettingsScreen extends Screen {
 
 		int width = Math.max(60, TtfTextRenderer.previewWidth(visible));
 		int height = TtfTextRenderer.previewHeight(visible);
-		int defaultX = left ? 2 : this.width - 2 - width;
+		// Anchor the default like the overlay does: the right column is pinned to the real card's
+		// width, not the sample card's, otherwise the dummy sits noticeably left of the real one.
+		int anchorWidth = Math.max(1, TtfTextRenderer.lastCardWidth(left));
+		int defaultX = left ? 2 : this.width - 2 - anchorWidth;
 		int[] stored = config.position(key);
 		int x = stored != null ? Math.round(stored[0] * this.width / 1000.0F) : defaultX;
 		int y = stored != null ? Math.round(stored[1] * this.height / 1000.0F) : 2;
 
-		// Grab bar above the card: dragging it moves the whole column.
-		Shapes.filled(graphics, x, y - 14, Math.min(width, 60), 12, 6, M3.SURFACE_CONTAINER_HIGHEST);
-		TtfTextRenderer.drawString(graphics, label, x + 6, y - 4, M3.ON_SURFACE_VARIANT_BRIGHT);
+		// Grab bar: above the card normally, below it when the card is at the top edge (the default
+		// anchor is y = 2, which would push a bar at y - 14 off-screen).
+		int grabWidth = Math.min(width, 60);
+		int grabY = y - 14 >= 0 ? y - 14 : y + height + 2;
+		Shapes.filled(graphics, x, grabY, grabWidth, 12, 6, M3.SURFACE_CONTAINER_HIGHEST);
+		TtfTextRenderer.drawString(graphics, label, x + 6, grabY + 10, M3.ON_SURFACE_VARIANT_BRIGHT);
 		TtfTextRenderer.drawPreview(graphics, visible, x, y);
 
-		targets.add(new Target(key, label, x, y - 14, Math.min(width, 60), 12));
+		targets.add(new Target(key, label, x, grabY, grabWidth, 12));
 
 		for (int index = 0; index < visible.size(); index++) {
 			int rowY = y + 3 + index * TtfTextRenderer.lineHeight();
