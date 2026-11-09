@@ -13,31 +13,21 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.util.profiling.ProfileResults;
 import net.minecraft.util.profiling.ResultField;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 /**
- * The F3 profiler's hotspot pie, drawn flat and anti-aliased with the slice names in the system
- * font.
+ * The F3+L profiler hotspot pie, drawn as a flat anti-aliased 2D chart with the slice names in
+ * the system font.
  *
- * <p>Vanilla renders the chart through {@code GuiGraphicsExtractor.profilerChart}, which builds
- * an extruded ("3D") pie out of flat quads per scanline — the curved edges are blocky and there
- * is no text on the slices, only a legend beside it.
+ * <p>Vanilla fills the same rectangle through {@code GuiGraphicsExtractor.profilerChart}: an
+ * extruded ("3D") pie assembled per scanline, so the curved rim is stair-stepped and the slices
+ * carry no text at all — everything is in a legend beside it.
  *
- * <p>This draws a 2D pie instead: the slices are rasterised once into a small texture with 3×3
- * supersampling, so the rim and the slice boundaries are smooth, and each slice that is large
- * enough gets its name (and share) printed inside it with the TrueType font.
+ * <p>This only replaces the pie itself; the caller keeps its layout, legend and tree navigation.
+ * Slices are rasterised into a small texture with 3×3 supersampling, so the rim and the boundaries
+ * are coverage-based rather than blocky, and each slice wide enough to hold its label gets
+ * {@code name 42%} printed inside it.
  */
 public final class PieChartRenderer {
-	private static final Logger LOGGER = LoggerFactory.getLogger("ohmyf3/pie");
-
-	/** Radius in GUI pixels; the chart panel is this wide plus a legend underneath. */
-	public static final int RADIUS = 100;
-
-	/** Texture side, in pixels: {@code 2 * RADIUS + 4} keeps a little room for the rim. */
-	private static final int SIZE = RADIUS * 2 + 4;
-
-	/** Samples per axis; 3 gives clean edges without a per-frame cost worth caching around. */
+	/** Samples per axis; 3 is enough for a smooth rim without a per-frame cost. */
 	private static final int SUBSAMPLES = 3;
 
 	/** Slices narrower than this (in degrees) get no label — the text would not fit. */
@@ -45,9 +35,7 @@ public final class PieChartRenderer {
 
 	private static final int LABEL_COLOR = 0xFFFFFFFF;
 	private static final int LABEL_SHADOW = 0xC0101010;
-	private static final int PANEL_FILL = 0xC8141418;
-	private static final int PANEL_BORDER = 0x2AFFFFFF;
-	private static final int GAP_COLOR = 0xFF101014;
+	private static final int RIM_COLOR = 0xFF101014;
 
 	private static final Identifier TEXTURE_ID = Identifier.fromNamespaceAndPath("ohmyf3", "profiler_pie");
 
@@ -62,51 +50,55 @@ public final class PieChartRenderer {
 	}
 
 	/**
-	 * Draws the chart with its top-left corner at {@code (x, y)}.
+	 * Draws the pie inside {@code [x1,y1]-[x2,y2]}.
 	 *
-	 * @return the height taken, so the caller can place anything below it
+	 * @return false when nothing could be drawn, so the caller can fall back to vanilla
 	 */
-	public static int render(GuiGraphicsExtractor graphics, ProfileResults results, String treePath, int x, int y) {
-		List<ResultField> fields = results == null ? List.of() : results.getTimes(treePath == null ? "" : treePath);
-
-		if (fields.isEmpty()) {
-			return 0;
+	public static boolean render(GuiGraphicsExtractor graphics, List<ResultField> fields,
+			int x1, int y1, int x2, int y2) {
+		if (fields == null || fields.isEmpty() || TtfTextRenderer.sampler() == null) {
+			return false;
 		}
 
-		ensureTexture();
+		float radius = Math.min(x2 - x1, y2 - y1) / 2.0F;
 
-		String key = fingerprint(fields);
+		if (radius < 6.0F) {
+			return false;
+		}
+
+		int size = Math.round(radius * 2.0F);
+
+		if (!ensureTexture(size)) {
+			return false;
+		}
+
+		double total = 0.0;
+
+		for (ResultField field : fields) {
+			total += Math.max(0.0, field.globalPercentage);
+		}
+
+		if (total <= 0.0) {
+			return false;
+		}
+
+		String key = size + ":" + fingerprint(fields);
 
 		if (!key.equals(lastKey)) {
-			rasterise(fields);
+			rasterise(fields, total, size);
 			lastKey = key;
 		}
 
-		if (view == null) {
-			return 0;
-		}
+		float centerX = (x1 + x2) / 2.0F;
+		float centerY = (y1 + y2) / 2.0F;
+		int left = Math.round(centerX - size / 2.0F);
+		int top = Math.round(centerY - size / 2.0F);
 
-		int panelWidth = RADIUS * 2 + 2 * PADDING;
-
-		// Panel behind the pie, so a bright sky cannot wash the labels out.
-		graphics.fill(x, y, x + panelWidth, y + SIZE + 2 * PADDING, PANEL_FILL);
-		graphics.outline(x, y, x + panelWidth, y + SIZE + 2 * PADDING, PANEL_BORDER);
-
-		int pieX = x + PADDING + 2;
-		int pieY = y + PADDING + 2;
-		Minecraft minecraft = Minecraft.getInstance();
-
-		if (TtfTextRenderer.sampler() != null) {
-			graphics.blit(view, TtfTextRenderer.sampler(), pieX, pieY, pieX + SIZE, pieY + SIZE,
-					0.0F, 1.0F, 0.0F, 1.0F);
-		}
-
-		drawSliceLabels(graphics, fields, pieX, pieY);
-
-		return SIZE + 2 * PADDING;
+		graphics.blit(view, TtfTextRenderer.sampler(), left, top, left + size, top + size,
+				0.0F, 1.0F, 0.0F, 1.0F);
+		drawSliceLabels(graphics, fields, total, centerX, centerY, radius);
+		return true;
 	}
-
-	private static final int PADDING = 4;
 
 	/** Percentages rounded to 0.5% keep the cache warm while the numbers drift every frame. */
 	private static String fingerprint(List<ResultField> fields) {
@@ -119,42 +111,32 @@ public final class PieChartRenderer {
 		return builder.toString();
 	}
 
-	private static void ensureTexture() {
-		if (image != null) {
-			return;
+	private static boolean ensureTexture(int size) {
+		if (image != null && image.getWidth() == size) {
+			return true;
 		}
 
-		image = new NativeImage(NativeImage.Format.RGBA, SIZE, SIZE, true);
+		if (image != null) {
+			// The chart is re-laid out when the GUI scale changes; a fresh texture is cheapest.
+			texture.close();
+			image = null;
+			view = null;
+			lastKey = "";
+		}
+
+		image = new NativeImage(NativeImage.Format.RGBA, size, size, true);
 		texture = new DynamicTexture(() -> "ohmyf3 profiler pie", image);
 		Minecraft.getInstance().getTextureManager().register(TEXTURE_ID, texture);
 		view = texture.getTextureView();
+		return view != null;
 	}
 
 	/**
-	 * Rasterises the slices with supersampled coverage.
-	 *
-	 * <p>Every sample point is classified by its angle, which keeps the slice boundaries exact
-	 * (no scanline stair-stepping) and gives the rim the same coverage-based smoothing as the mod's
-	 * glyphs.
+	 * Rasterises the slices with supersampled coverage: every sample point is classified by its
+	 * angle, so boundaries are exact instead of stair-stepped, and the rim is smoothed the same way
+	 * the mod's glyphs are.
 	 */
-	private static void rasterise(List<ResultField> fields) {
-		if (image == null) {
-			return;
-		}
-
-		double total = 0.0;
-
-		for (ResultField field : fields) {
-			total += Math.max(0.0, field.globalPercentage);
-		}
-
-		if (total <= 0.0) {
-			image.fillRect(0, 0, SIZE, SIZE, 0);
-			texture.upload();
-			return;
-		}
-
-		// Cumulative start angle per slice, in degrees starting at 12 o'clock.
+	private static void rasterise(List<ResultField> fields, double total, int size) {
 		double[] starts = new double[fields.size()];
 		double[] ends = new double[fields.size()];
 		int[] colors = new int[fields.size()];
@@ -165,18 +147,18 @@ public final class PieChartRenderer {
 			starts[i] = cursor;
 			cursor += share * 360.0;
 			ends[i] = cursor;
-			colors[i] = sliceColor(i, fields.get(i));
+			colors[i] = sliceColor(i);
 		}
 
-		float center = SIZE / 2.0F;
-		float radius = RADIUS;
+		float center = size / 2.0F;
+		float radius = size / 2.0F - 1.0F;
 
-		for (int py = 0; py < SIZE; py++) {
-			for (int px = 0; px < SIZE; px++) {
+		for (int py = 0; py < size; py++) {
+			for (int px = 0; px < size; px++) {
 				double rSum = 0;
 				double gSum = 0;
 				double bSum = 0;
-				double aSum = 0;
+				int covered = 0;
 
 				for (int sy = 0; sy < SUBSAMPLES; sy++) {
 					for (int sx = 0; sx < SUBSAMPLES; sx++) {
@@ -203,28 +185,25 @@ public final class PieChartRenderer {
 						}
 
 						int color = colors[slice];
-
-						rSum += (color >> 16 & 0xFF);
-						gSum += (color >> 8 & 0xFF);
-						bSum += (color & 0xFF);
-						aSum += 255;
+						rSum += color >> 16 & 0xFF;
+						gSum += color >> 8 & 0xFF;
+						bSum += color & 0xFF;
+						covered++;
 					}
 				}
 
-				double samples = SUBSAMPLES * SUBSAMPLES;
-				int alpha = (int) Math.round(aSum / samples);
-
-				if (alpha <= 0) {
+				if (covered == 0) {
 					image.setPixel(px, py, 0);
 					continue;
 				}
 
-				int coverage = (int) Math.round(255.0 * (aSum / (samples * 255.0)));
-				int r = (int) Math.round(rSum / (aSum / 255.0));
-				int g = (int) Math.round(gSum / (aSum / 255.0));
-				int b = (int) Math.round(bSum / (aSum / 255.0));
+				int samples = SUBSAMPLES * SUBSAMPLES;
+				int alpha = Math.round(255.0F * covered / samples);
+				int r = clamp((int) Math.round(rSum / covered));
+				int g = clamp((int) Math.round(gSum / covered));
+				int b = clamp((int) Math.round(bSum / covered));
 
-				image.setPixel(px, py, coverage << 24 | clamp(r) << 16 | clamp(g) << 8 | clamp(b));
+				image.setPixel(px, py, alpha << 24 | r << 16 | g << 8 | b);
 			}
 		}
 
@@ -238,35 +217,22 @@ public final class PieChartRenderer {
 			}
 		}
 
-		// The last slice owns the 360° wrap-around.
 		return starts.length == 0 ? -1 : starts.length - 1;
 	}
 
-	private static int sliceColor(int index, ResultField field) {
+	private static int sliceColor(int index) {
 		// Evenly spread hues read better than vanilla's name-hash greys, and stay stable per slice.
 		float hue = (index * 0.6180339F) % 1.0F;
-		int rgb = java.awt.Color.HSBtoRGB(hue, 0.55F, 0.95F);
-		return 0xFF000000 | rgb;
+		return 0xFF000000 | java.awt.Color.HSBtoRGB(hue, 0.55F, 0.95F);
 	}
 
 	private static int clamp(int value) {
 		return value < 0 ? 0 : Math.min(value, 255);
 	}
 
-	private static void drawSliceLabels(GuiGraphicsExtractor graphics, List<ResultField> fields, int pieX, int pieY) {
-		double total = 0.0;
-
-		for (ResultField field : fields) {
-			total += Math.max(0.0, field.globalPercentage);
-		}
-
-		if (total <= 0.0) {
-			return;
-		}
-
+	private static void drawSliceLabels(GuiGraphicsExtractor graphics, List<ResultField> fields, double total,
+			float centerX, float centerY, float radius) {
 		double cursor = 0.0;
-		float centerX = pieX + SIZE / 2.0F;
-		float centerY = pieY + SIZE / 2.0F;
 
 		for (ResultField field : fields) {
 			double share = Math.max(0.0, field.globalPercentage) / total;
@@ -279,22 +245,21 @@ public final class PieChartRenderer {
 			}
 
 			double mid = Math.toRadians((startDegrees + endDegrees) / 2.0 - 90.0);
-			float labelRadius = RADIUS * 0.62F;
+			float labelRadius = radius * 0.62F;
 			float textX = centerX + (float) Math.cos(mid) * labelRadius;
 			float textY = centerY + (float) Math.sin(mid) * labelRadius;
 
 			String label = shortName(field.name) + " " + Math.round(share * 100.0) + "%";
 			int width = TtfTextRenderer.stringWidth(label);
 
-			// Skip rather than overflow the slice.
-			if (width > (endDegrees - startDegrees) / 360.0 * Math.PI * RADIUS * 1.35) {
+			// The chord the label has to fit across; skip rather than overflow into a neighbour.
+			if (width > (endDegrees - startDegrees) / 360.0 * Math.PI * radius * 1.35) {
 				continue;
 			}
 
 			int baseline = Math.round(textY + TtfTextRenderer.lineHeight() / 2.0F) - 1;
 			float left = textX - width / 2.0F;
 
-			// Shadow first: a flat colour on a mid-tone slice is otherwise hard to read.
 			TtfTextRenderer.drawString(graphics, label, left + 1, baseline + 1, LABEL_SHADOW);
 			TtfTextRenderer.drawString(graphics, label, left, baseline, LABEL_COLOR);
 		}
