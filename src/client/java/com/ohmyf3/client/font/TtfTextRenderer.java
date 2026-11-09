@@ -537,6 +537,10 @@ public final class TtfTextRenderer {
 	 * advance width, so callers can lay out several runs on the same line.
 	 */
 	public static float drawString(GuiGraphicsExtractor graphics, String text, float x, int baseline, int color) {
+		// The settings screen can be the first thing drawn (e.g. opened from ModMenu), so this has
+		// to initialise on demand instead of assuming the F3 overlay already did.
+		ensureInitialised();
+
 		if (!ready || text == null || text.isEmpty()) {
 			return 0.0F;
 		}
@@ -546,6 +550,8 @@ public final class TtfTextRenderer {
 
 	/** Width of {@code text} in GUI pixels, with the same metrics {@link #drawString} uses. */
 	public static int stringWidth(String text) {
+		ensureInitialised();
+
 		if (!ready || text == null || text.isEmpty()) {
 			return 0;
 		}
