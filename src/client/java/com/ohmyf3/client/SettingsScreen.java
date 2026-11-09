@@ -298,8 +298,14 @@ public final class SettingsScreen extends Screen {
 		int width = Math.max(60, TtfTextRenderer.previewWidth(visible));
 		int height = TtfTextRenderer.previewHeight(visible);
 		// Anchor the default like the overlay does: the right column is pinned to the real card's
-		// width, not the sample card's, otherwise the dummy sits noticeably left of the real one.
-		int anchorWidth = Math.max(1, TtfTextRenderer.lastCardWidth(left));
+		// width. That width is 0 until the overlay has drawn once, so fall back to the sample card —
+		// using it directly pushed the whole column past the right edge of the screen.
+		int anchorWidth = TtfTextRenderer.lastCardWidth(left);
+
+		if (anchorWidth <= 0) {
+			anchorWidth = Math.max(60, width);
+		}
+
 		int defaultX = left ? 2 : this.width - 2 - anchorWidth;
 		int[] stored = config.position(key);
 		int x = stored != null ? Math.round(stored[0] * this.width / 1000.0F) : defaultX;
