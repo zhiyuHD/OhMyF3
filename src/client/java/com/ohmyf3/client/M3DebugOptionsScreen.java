@@ -35,7 +35,8 @@ public final class M3DebugOptionsScreen extends Screen {
 	private static final int LEFT_BUTTON = 1;
 	private static final int PANEL_WIDTH = 420;
 	private static final int PADDING = 20;
-	private static final int ROW_HEIGHT = 30;
+	/** Row pitch: the M3 list item is 44 tall, plus an 8px gap so rows never touch. */
+	private static final int ROW_HEIGHT = 52;
 	private static final int HEADER_HEIGHT = 26;
 	private static final int FOOTER_HEIGHT = 32;
 
@@ -148,10 +149,7 @@ public final class M3DebugOptionsScreen extends Screen {
 				break;
 			}
 
-			boolean on = statuses.getStatus(entry.id()) != DebugScreenEntryStatus.NEVER;
-			boolean hovered = M3.inside(mouseX, mouseY, x, rowY, width, ROW_HEIGHT - 4);
-			M3.switchRow(graphics, x, rowY, width, shortName(entry.id()), entry.id().getNamespace(),
-					on, hovered);
+			renderRow(graphics, entry, statuses.getStatus(entry.id()), x, rowY, width, mouseX, mouseY);
 			rowY += ROW_HEIGHT;
 		}
 
@@ -165,18 +163,65 @@ public final class M3DebugOptionsScreen extends Screen {
 		}
 	}
 
+	/** Vanilla's three states, as Material 3 segmented chips. */
+	private static final DebugScreenEntryStatus[] STATES = {DebugScreenEntryStatus.ALWAYS_ON,
+			DebugScreenEntryStatus.IN_OVERLAY, DebugScreenEntryStatus.NEVER};
+
+	private static final String[] STATE_LABELS = {"常显", "F3", "关闭"};
+
+	private static final int CHIP_WIDTH = 46;
+	private static final int CHIP_HEIGHT = 22;
+	private static final int CHIP_GAP = 6;
+
+	/** Left edge of the chip row for a list item of the given width. */
+	private static int chipX(int x, int width, int index) {
+		int total = STATES.length * CHIP_WIDTH + (STATES.length - 1) * CHIP_GAP;
+		return x + width - 16 - total + index * (CHIP_WIDTH + CHIP_GAP);
+	}
+
+	private void renderRow(GuiGraphicsExtractor graphics, Entry entry, DebugScreenEntryStatus status,
+			int x, int rowY, int width, int mouseX, int mouseY) {
+		boolean hovered = M3.inside(mouseX, mouseY, x, rowY, width, M3.ROW_HEIGHT);
+		Shapes.filled(graphics, x, rowY, width, M3.ROW_HEIGHT, M3.RADIUS_LARGE,
+				hovered ? M3.SURFACE_CONTAINER_HIGHEST : M3.SURFACE_CONTAINER_HIGH);
+
+		TtfTextRenderer.drawString(graphics, shortName(entry.id()), x + 16, rowY + 17, M3.ON_SURFACE);
+		TtfTextRenderer.drawString(graphics, entry.id().getNamespace(), x + 16, rowY + 30,
+				M3.ON_SURFACE_VARIANT_BRIGHT);
+
+		for (int i = 0; i < STATES.length; i++) {
+			boolean active = status == STATES[i];
+			boolean chipHovered = M3.inside(mouseX, mouseY, chipX(x, width, i), rowY + (M3.ROW_HEIGHT - CHIP_HEIGHT) / 2,
+					CHIP_WIDTH, CHIP_HEIGHT);
+			int fill = active ? M3.PRIMARY_CONTAINER
+					: chipHovered ? M3.SURFACE_CONTAINER_HIGHEST : M3.SURFACE_CONTAINER_HIGH;
+
+			Shapes.filled(graphics, chipX(x, width, i), rowY + (M3.ROW_HEIGHT - CHIP_HEIGHT) / 2, CHIP_WIDTH,
+					CHIP_HEIGHT, CHIP_HEIGHT / 2, fill);
+
+			int textWidth = TtfTextRenderer.stringWidth(STATE_LABELS[i]);
+			TtfTextRenderer.drawString(graphics, STATE_LABELS[i],
+					chipX(x, width, i) + (CHIP_WIDTH - textWidth) / 2.0F,
+					rowY + M3.ROW_HEIGHT / 2 + TtfTextRenderer.lineHeight() / 2 - 2,
+					active ? M3.ON_PRIMARY_CONTAINER : M3.ON_SURFACE_VARIANT_BRIGHT);
+		}
+	}
+
 	private void renderFooter(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
 		int x = panelX() + PADDING;
 		int y = panelY() + panelHeight() - PADDING - FOOTER_HEIGHT;
-		int doneWidth = 80;
-		int allOnWidth = 92;
-		int allOffWidth = 92;
+		int doneWidth = 72;
+		int resetWidth = 96;
+		int allOnWidth = 88;
+		int allOffWidth = 88;
 
 		buttons.clear();
 		buttons.add(new Button("done", "完成", x, y, doneWidth, FOOTER_HEIGHT, true));
-		buttons.add(new Button("allOn", "全部开启", x + doneWidth + 8, y, allOnWidth, FOOTER_HEIGHT, false));
-		buttons.add(new Button("allOff", "全部关闭", x + doneWidth + allOnWidth + 16, y, allOffWidth, FOOTER_HEIGHT,
+		buttons.add(new Button("reset", "恢复默认", x + doneWidth + 8, y, resetWidth, FOOTER_HEIGHT, false));
+		buttons.add(new Button("allOn", "全部开启", x + doneWidth + resetWidth + 16, y, allOnWidth, FOOTER_HEIGHT,
 				false));
+		buttons.add(new Button("allOff", "全部关闭", x + doneWidth + resetWidth + allOnWidth + 24, y, allOffWidth,
+				FOOTER_HEIGHT, false));
 
 		for (Button button : buttons) {
 			boolean hovered = M3.inside(mouseX, mouseY, button.x(), button.y(), button.width(), button.height());
@@ -221,13 +266,46 @@ public final class M3DebugOptionsScreen extends Screen {
 
 		if (clicked != null) {
 			DebugScreenEntryList statuses = Minecraft.getInstance().debugEntries;
-			boolean on = statuses.getStatus(clicked.id()) != DebugScreenEntryStatus.NEVER;
-			statuses.setStatus(clicked.id(), on ? DebugScreenEntryStatus.NEVER : DebugScreenEntryStatus.IN_OVERLAY);
-			statuses.save();
+			int x = panelX() + PADDING;
+			int width = PANEL_WIDTH - PADDING * 2;
+			int rowY = rowTopY(clicked);
+
+			for (int i = 0; i < STATES.length; i++) {
+				if (M3.inside(mouseX, mouseY, chipX(x, width, i), rowY + (M3.ROW_HEIGHT - CHIP_HEIGHT) / 2, CHIP_WIDTH,
+						CHIP_HEIGHT)) {
+					statuses.setStatus(clicked.id(), STATES[i]);
+					statuses.save();
+					return true;
+				}
+			}
+
 			return true;
 		}
 
 		return super.mouseClicked(event, quickMove);
+	}
+
+	/** Top edge of the row currently drawn for {@code entry}. */
+	private int rowTopY(Entry entry) {
+		DebugEntryCategory lastCategory = null;
+		int rowY = listTop();
+
+		for (int i = scroll; i < entries.size(); i++) {
+			Entry current = entries.get(i);
+
+			if (lastCategory == null || !lastCategory.equals(current.category())) {
+				lastCategory = current.category();
+				rowY += HEADER_HEIGHT;
+			}
+
+			if (current == entry) {
+				return rowY;
+			}
+
+			rowY += ROW_HEIGHT;
+		}
+
+		return rowY;
 	}
 
 	/** Which entry's row is under the pointer, using the same layout the renderer just drew. */
@@ -274,6 +352,10 @@ public final class M3DebugOptionsScreen extends Screen {
 
 		switch (key) {
 			case "done" -> close();
+			case "reset" -> {
+				statuses.loadProfile(net.minecraft.client.gui.components.debug.DebugScreenProfile.DEFAULT);
+				statuses.save();
+			}
 			case "allOn" -> {
 				for (Entry entry : entries) {
 					statuses.setStatus(entry.id(), DebugScreenEntryStatus.IN_OVERLAY);
