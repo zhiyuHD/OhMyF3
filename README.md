@@ -1,5 +1,7 @@
 # OhMyF3
 
+**English** | [简体中文](README.zh-CN.md)
+
 [![Minecraft](https://img.shields.io/badge/Minecraft-26.3-62B47A?logo=minecraft&logoColor=white)](#)
 [![Fabric Loader](https://img.shields.io/badge/Fabric%20Loader-0.20.1%2B-dbb67b)](#)
 [![Java](https://img.shields.io/badge/Java-25-orange?logo=openjdk&logoColor=white)](#)
