@@ -3,7 +3,6 @@ package com.ohmyf3.font;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * Turns a raw debug-screen line into an icon-led {@code key: value} entry.
@@ -18,8 +17,14 @@ import java.util.Set;
  * {@code DebugScreenOverlay}, which is a much larger change.
  */
 public final class EntryClassifier {
-	/** One classified line. {@code key} may be empty when the line has no {@code key:} form. */
-	public record Entry(IconPainter.Icon icon, String key, String value, boolean vanilla) {
+	/**
+	 * One classified line. {@code key} may be empty when the line has no {@code key:} form.
+	 *
+	 * <p>This class only recovers structure (icon, key, value); whether a row came from a mod
+	 * is decided by {@code DebugEntryOrigin} from the owning entry's namespace, not guessed
+	 * from the text.
+	 */
+	public record Entry(IconPainter.Icon icon, String key, String value) {
 	}
 
 	private static final char FORMATTING_CODE = '\u00a7';
@@ -28,15 +33,6 @@ public final class EntryClassifier {
 	private static final int MAX_KEY_LENGTH = 26;
 
 	private static final Map<String, IconPainter.Icon> ICONS_BY_KEY = new HashMap<>();
-
-	private static final Set<String> VANILLA_KEYS = Set.of(
-			"xyz", "block", "chunk", "facing", "light", "biome", "day", "time", "seed", "difficulty",
-			"entities", "entity", "particles", "sounds", "section-relative", "debug charts",
-			"pools", "chunk builder", "tasks", "duration", "size", "ts", "n", "qd",
-			"mem", "allocation rate", "allocated", "off-heap", "java", "cpu", "display", "window",
-			"opengl", "gpu", "sodium renderer", "terrain rendering", "integrated server",
-			"fancy-clouds b", "filtering", "e", "fps", "t", "client chunk", "server chunk",
-			"dimension", "dim", "local difficulty", "minecraft");
 
 	static {
 		ICONS_BY_KEY.put("xyz", IconPainter.Icon.CROSSHAIR);
@@ -93,15 +89,14 @@ public final class EntryClassifier {
 		String plain = stripFormatting(line).trim();
 
 		if (plain.isEmpty()) {
-			return new Entry(IconPainter.Icon.DOT, "", line, true);
+			return new Entry(IconPainter.Icon.DOT, "", line);
 		}
 
 		// "61 fps T: 120 (fifo) @119.96Hz" has no separator before the metric.
 		int fpsIndex = plain.indexOf(" fps");
 
 		if (fpsIndex > 0 && isAllDigits(plain.substring(0, fpsIndex))) {
-			String value = line;
-			return new Entry(IconPainter.Icon.GAUGE, "fps", value, true);
+			return new Entry(IconPainter.Icon.GAUGE, "fps", line);
 		}
 
 		String[] split = splitOnColon(line);
@@ -113,8 +108,7 @@ public final class EntryClassifier {
 				icon = IconPainter.Icon.DOT;
 			}
 
-			boolean vanilla = looksVanillaValue(plain);
-			return new Entry(icon, "", line, vanilla);
+			return new Entry(icon, "", line);
 		}
 
 		String key = stripFormatting(split[0]).trim();
@@ -129,8 +123,7 @@ public final class EntryClassifier {
 			}
 		}
 
-		boolean vanilla = VANILLA_KEYS.contains(lower);
-		return new Entry(icon, key, split[1], vanilla);
+		return new Entry(icon, key, split[1]);
 	}
 
 	/** Splits on the first colon that appears before the key gets implausibly long. */
@@ -169,14 +162,6 @@ public final class EntryClassifier {
 		}
 
 		return text.substring(start);
-	}
-
-	private static boolean looksVanillaValue(String plain) {
-		if (plain.startsWith("N=") || plain.startsWith("TS (") || plain.startsWith("QD:")) {
-			return true;
-		}
-
-		return plain.contains(" fps") || plain.startsWith("Debug charts");
 	}
 
 	private static boolean isAllDigits(String text) {

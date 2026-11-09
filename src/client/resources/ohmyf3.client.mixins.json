@@ -4,7 +4,9 @@
 	"compatibilityLevel": "JAVA_25",
 	"client": [
 		"DebugScreenOverlayMixin",
-		"HudMixin"
+		"HudMixin",
+		"DebugScreenEntriesMixin",
+		"DebugScreenDisplayerMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

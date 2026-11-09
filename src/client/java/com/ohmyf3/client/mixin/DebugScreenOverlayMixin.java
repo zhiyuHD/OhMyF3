@@ -2,6 +2,7 @@ package com.ohmyf3.client.mixin;
 
 import java.util.List;
 
+import com.ohmyf3.client.DebugEntryOrigin;
 import com.ohmyf3.client.DebugOverlaySlide;
 import com.ohmyf3.client.font.TtfTextRenderer;
 
@@ -31,6 +32,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class DebugScreenOverlayMixin {
 	/** Whether the vanilla path pushed a translation that still has to be popped. */
 	private static boolean ohmyf3$posePushed;
+
+	@Inject(method = "extractRenderState", at = @At("HEAD"))
+	private void ohmyf3$beginFrame(GuiGraphicsExtractor graphics, CallbackInfo ci) {
+		DebugEntryOrigin.beginFrame();
+	}
 
 	@Inject(method = "extractLines", at = @At("HEAD"), cancellable = true)
 	private void ohmyf3$drawColumn(GuiGraphicsExtractor graphics, List<String> lines, boolean alignLeft,

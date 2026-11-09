@@ -111,12 +111,22 @@ The content itself is rebuilt around icons rather than decorated with them:
 - rows that are not vanilla fields go into a separate **Mods card** at the end of the column,
   with an amber border and a `Mods` header.
 
-Category detection is a whitelist of the field names vanilla 26.3 prints (`XYZ`, `Block`,
-`Chunk`, `Facing`, `Mem`, `Pools`, `Chunk Builder`, `Tasks`, `Duration`, `Java`, `CPU`,
-`OpenGL`, ...); anything else is treated as mod content. This is heuristic: a mod that prints
-`Mem: ...` would be classified as vanilla. Tagging by owning entry would mean hooking the
-`DebugScreenDisplayer` inside `DebugScreenOverlay`, which is a much larger change than this
-mod needs right now.
+### Telling mod rows apart
+
+Rows are **not** guessed from their text. The overlay assembles the screen from registered
+entries: for every visible id it looks up the entry and asks it to emit lines through a
+`DebugScreenDisplayer`. Vanilla registers under the `minecraft` namespace and mods under their
+own, so the namespace of the entry that emitted a line answers "who wrote this row" exactly.
+
+`DebugScreenEntriesMixin` hooks `DebugScreenEntries.getEntry(id)` — called once per entry,
+immediately before that entry emits — and `DebugScreenDisplayerMixin` tags each line pushed
+through the displayer with that namespace. Lines are matched by object identity, because the
+displayer stores the very same `String` instances the overlay later hands to `extractLines`.
+Rows the overlay synthesises itself (blank separators, the "to edit" hints) are never tagged
+and stay in the vanilla area, so they cannot be misattributed.
+
+`EntryClassifier` therefore only recovers structure — icon, key, value — and says nothing
+about ownership.
 
 ## Keyword icons
 

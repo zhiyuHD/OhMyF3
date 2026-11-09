@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.ohmyf3.client.DebugEntryOrigin;
 import com.ohmyf3.font.CoverageBitmap;
 import com.ohmyf3.font.EntryClassifier;
 import com.ohmyf3.font.GlyphOutline;
@@ -97,6 +98,8 @@ public final class TtfTextRenderer {
 	private static final Map<GlyphKey, Sprite> GLYPHS = new HashMap<>();
 	private static final Map<IconKey, Sprite> ICONS = new HashMap<>();
 
+	private static List<String> lastModRows = List.of();
+
 	private static GlyphAtlas.Rect cardFill;
 	private static GlyphAtlas.Rect cardBorder;
 	private static GlyphAtlas.Rect cardBorderMods;
@@ -112,8 +115,8 @@ public final class TtfTextRenderer {
 
 	/** One debug row: icon, dim key, bright value. */
 	private record Row(IconPainter.Icon icon, List<Cell> keyCells, List<Cell> valueCells, boolean vanilla,
-			boolean header) {
-		static final Row EMPTY = new Row(null, List.of(), List.of(), true, false);
+			boolean header, String raw) {
+		static final Row EMPTY = new Row(null, List.of(), List.of(), true, false, "");
 	}
 
 	private record GlyphKey(int codePoint, int color) {
@@ -161,6 +164,10 @@ public final class TtfTextRenderer {
 			atlas.clearDirty();
 		}
 
+		if (alignLeft) {
+			logModRows(rows);
+		}
+
 		drawColumn(graphics, rows, alignLeft, screenWidth);
 	}
 
@@ -203,7 +210,7 @@ public final class TtfTextRenderer {
 
 		if (!mods.isEmpty()) {
 			// A labelled card so third-party rows are clearly their own area.
-			Row header = new Row(null, List.of(), cellsFor("Mods", KEY_COLOR), false, true);
+			Row header = new Row(null, List.of(), cellsFor("Mods", KEY_COLOR), false, true, "Mods");
 			List<Row> withHeader = new ArrayList<>();
 			withHeader.add(header);
 			withHeader.addAll(mods);
@@ -413,6 +420,26 @@ public final class TtfTextRenderer {
 		};
 	}
 
+	/** Logs which rows were attributed to mods, so the split can be verified from the log. */
+	private static void logModRows(List<Row> rows) {
+		List<String> mods = new ArrayList<>();
+
+		for (Row row : rows) {
+			if (!row.vanilla() && hasContent(row)) {
+				mods.add(textOf(row));
+			}
+		}
+
+		if (!mods.equals(lastModRows)) {
+			lastModRows = mods;
+			LOGGER.info("mod-attributed F3 rows ({}): {}", mods.size(), mods);
+		}
+	}
+
+	private static String textOf(Row row) {
+		return row.raw();
+	}
+
 	private static int widthOf(List<Cell> cells) {
 		float width = 0;
 
@@ -431,7 +458,12 @@ public final class TtfTextRenderer {
 		List<Cell> keyCells = entry.key().isEmpty() ? List.of() : cellsFor(entry.key(), KEY_COLOR);
 		List<Cell> valueCells = cellsFor(entry.value(), DEFAULT_COLOR);
 
-		return new Row(entry.icon(), keyCells, valueCells, entry.vanilla(), false);
+		// Only rows whose owning entry registered outside the minecraft namespace are mod
+		// content. Untagged rows are synthesised by the overlay itself (separators, the
+		// "to edit" hints) and stay in the vanilla area.
+		boolean vanilla = !Boolean.TRUE.equals(DebugEntryOrigin.modded(line));
+
+		return new Row(entry.icon(), keyCells, valueCells, vanilla, false, line);
 	}
 
 	/** Splits text into glyph cells, honouring {@code §} colour codes. */
