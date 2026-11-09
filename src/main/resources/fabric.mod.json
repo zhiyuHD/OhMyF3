@@ -1,0 +1,34 @@
+{
+	"schemaVersion": 1,
+	"id": "ohmyf3",
+	"version": "${version}",
+	"name": "OhMyF3",
+	"description": "A Fabric mod for Minecraft 26.3.",
+	"authors": [
+		"OhMyF3"
+	],
+	"contact": {},
+	"license": "MIT",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"com.ohmyf3.OhMyF3"
+		],
+		"client": [
+			"com.ohmyf3.client.OhMyF3Client"
+		]
+	},
+	"mixins": [
+		"ohmyf3.mixins.json",
+		{
+			"config": "ohmyf3.client.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.20.1",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}
