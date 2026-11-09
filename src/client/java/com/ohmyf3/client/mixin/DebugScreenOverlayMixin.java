@@ -36,6 +36,7 @@ public abstract class DebugScreenOverlayMixin {
 	@Inject(method = "extractRenderState", at = @At("HEAD"))
 	private void ohmyf3$beginFrame(GuiGraphicsExtractor graphics, CallbackInfo ci) {
 		DebugEntryOrigin.beginFrame();
+		TtfTextRenderer.beginFrame();
 	}
 
 	@Inject(method = "extractLines", at = @At("HEAD"), cancellable = true)

@@ -106,7 +106,10 @@ The content itself is rebuilt around icons rather than decorated with them:
   (`EntryClassifier`); the key is drawn dim, the value bright;
 - values form a real column: each card aligns them at the widest key, so the numbers line up;
 - blank lines still separate groups, and each group is a **rounded card** (nine-slice texture
-  generated in code: fill `0xC8141418`, 1px border, 3px radius);
+  generated in code: fill `0xC8141418`, 1px border, 6px radius);
+- the backdrop is **blurred** behind the cards via the GUI render state's once-per-frame
+  `blurBeforeThisStratum()`; if anything else already used the frame's blur the overlay simply
+  draws sharp;
 - every row has a fixed **icon gutter**, tinted per category;
 - rows that are not vanilla fields go into a separate **Mods card** at the end of the column,
   with an amber border and a `Mods` header.

@@ -52,8 +52,8 @@ public final class TtfTextRenderer {
 	/** Card geometry, in GUI units. */
 	private static final int CARD_PADDING = 3;
 	private static final int CARD_GAP = 4;
-	private static final int CARD_CORNER = 4;
-	private static final int CARD_RADIUS = 3;
+	private static final int CARD_CORNER = 7;
+	private static final int CARD_RADIUS = 6;
 	/** Width reserved for the icon column. */
 	private static final int GUTTER = ICON_SIZE + ICON_GAP;
 
@@ -100,6 +100,9 @@ public final class TtfTextRenderer {
 
 	private static List<String> lastModRows = List.of();
 
+	/** The GUI render state allows exactly one blur per frame. */
+	private static boolean blurredThisFrame;
+
 	private static GlyphAtlas.Rect cardFill;
 	private static GlyphAtlas.Rect cardBorder;
 	private static GlyphAtlas.Rect cardBorderMods;
@@ -134,6 +137,11 @@ public final class TtfTextRenderer {
 		return lineHeight;
 	}
 
+	/** Called once per frame, before the overlay assembles its columns. */
+	public static void beginFrame() {
+		blurredThisFrame = false;
+	}
+
 	public static void drawLines(GuiGraphicsExtractor graphics, List<String> lines, boolean alignLeft,
 			int screenWidth) {
 		ensureInitialised();
@@ -166,6 +174,19 @@ public final class TtfTextRenderer {
 
 		if (alignLeft) {
 			logModRows(rows);
+		}
+
+		if (!rows.isEmpty() && !blurredThisFrame) {
+			blurredThisFrame = true;
+
+			try {
+				// Blurs everything recorded before this stratum, so the world and the rest of
+				// the HUD sit behind the cards out of focus.
+				graphics.blurBeforeThisStratum();
+			} catch (Throwable throwable) {
+				// Another screen already used the frame's single blur; draw sharp instead.
+				LOGGER.debug("backdrop blur unavailable", throwable);
+			}
 		}
 
 		drawColumn(graphics, rows, alignLeft, screenWidth);
