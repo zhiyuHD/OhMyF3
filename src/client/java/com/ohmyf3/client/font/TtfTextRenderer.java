@@ -273,13 +273,7 @@ public final class TtfTextRenderer {
 		// Rows the player dragged out of the column are drawn as standalone cards first, and are
 		// excluded from the flow below so the column closes up behind them.
 		for (Row row : rows) {
-			String pinned = pinnedKey(row);
-
-			if (pinned == null) {
-				continue;
-			}
-
-			int[] position = OhMyF3Config.get().position(pinned);
+			int[] position = pinnedPosition(row);
 
 			if (position == null) {
 				continue;
@@ -298,7 +292,7 @@ public final class TtfTextRenderer {
 
 		// Vanilla rows keep their blank-line grouping; mod rows are collected into one card.
 		for (Row row : rows) {
-			if (!row.vanilla() || pinnedKey(row) != null) {
+			if (!row.vanilla() || pinnedPosition(row) != null) {
 				continue;
 			}
 
@@ -321,7 +315,7 @@ public final class TtfTextRenderer {
 		List<Row> mods = new ArrayList<>();
 
 		for (Row row : rows) {
-			if (!row.vanilla() && hasContent(row) && pinnedKey(row) == null) {
+			if (!row.vanilla() && hasContent(row) && pinnedPosition(row) == null) {
 				mods.add(row);
 			}
 		}
@@ -390,6 +384,17 @@ public final class TtfTextRenderer {
 		String key = EntryClassifier.classify(row.raw()).key();
 
 		return key == null || key.isEmpty() ? null : "row:" + key;
+	}
+
+	/**
+	 * Stored position of a pinned row, or {@code null} when it still flows in its column.
+	 *
+	 * <p>Only a row that the player actually moved is pinned — a row merely having a classifier key
+	 * is not enough, otherwise every un-moved row would be filtered out of the column and vanish.
+	 */
+	private static int[] pinnedPosition(Row row) {
+		String key = pinnedKey(row);
+		return key == null ? null : OhMyF3Config.get().position(key);
 	}
 
 	/**

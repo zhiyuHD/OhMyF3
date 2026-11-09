@@ -274,7 +274,7 @@ public final class M3DebugOptionsScreen extends Screen {
 				if (M3.inside(mouseX, mouseY, chipX(x, width, i), rowY + (M3.ROW_HEIGHT - CHIP_HEIGHT) / 2, CHIP_WIDTH,
 						CHIP_HEIGHT)) {
 					statuses.setStatus(clicked.id(), STATES[i]);
-					statuses.save();
+					apply(statuses);
 					return true;
 				}
 			}
@@ -347,6 +347,18 @@ public final class M3DebugOptionsScreen extends Screen {
 		return super.mouseScrolled(mouseX, mouseY, horizontal, vertical);
 	}
 
+	/**
+	 * Commits a status change.
+	 *
+	 * <p>{@code setStatus} only edits the per-entry map; the overlay reads the cached enabled list,
+	 * so without {@code rebuildCurrentList} the saved change had no visible effect until something
+	 * else happened to refresh it — which is exactly why toggling an entry appeared to do nothing.
+	 */
+	private static void apply(DebugScreenEntryList statuses) {
+		statuses.rebuildCurrentList();
+		statuses.save();
+	}
+
 	private void onButton(String key) {
 		DebugScreenEntryList statuses = Minecraft.getInstance().debugEntries;
 
@@ -354,21 +366,21 @@ public final class M3DebugOptionsScreen extends Screen {
 			case "done" -> close();
 			case "reset" -> {
 				statuses.loadProfile(net.minecraft.client.gui.components.debug.DebugScreenProfile.DEFAULT);
-				statuses.save();
+				apply(statuses);
 			}
 			case "allOn" -> {
 				for (Entry entry : entries) {
 					statuses.setStatus(entry.id(), DebugScreenEntryStatus.IN_OVERLAY);
 				}
 
-				statuses.save();
+				apply(statuses);
 			}
 			case "allOff" -> {
 				for (Entry entry : entries) {
 					statuses.setStatus(entry.id(), DebugScreenEntryStatus.NEVER);
 				}
 
-				statuses.save();
+				apply(statuses);
 			}
 			default -> {
 			}
