@@ -532,6 +532,33 @@ public final class TtfTextRenderer {
 		return penX;
 	}
 
+	/**
+	 * Draws one line of text with the system font at {@code (x, baseline)} and returns the
+	 * advance width, so callers can lay out several runs on the same line.
+	 */
+	public static float drawString(GuiGraphicsExtractor graphics, String text, float x, int baseline, int color) {
+		if (!ready || text == null || text.isEmpty()) {
+			return 0.0F;
+		}
+
+		return drawCells(graphics, cellsFor(text, color), x, baseline);
+	}
+
+	/** Width of {@code text} in GUI pixels, with the same metrics {@link #drawString} uses. */
+	public static int stringWidth(String text) {
+		if (!ready || text == null || text.isEmpty()) {
+			return 0;
+		}
+
+		float width = 0.0F;
+
+		for (Cell cell : cellsFor(text, DEFAULT_COLOR)) {
+			width += cell.advance();
+		}
+
+		return Math.round(width);
+	}
+
 	/** Icons get their own accent colour so they read as a group at a glance. */
 	private static int iconColor(IconPainter.Icon icon) {
 		return switch (icon) {

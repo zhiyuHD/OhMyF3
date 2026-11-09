@@ -9,7 +9,8 @@
 		"DebugScreenDisplayerMixin",
 		"GuiRendererMixin",
 		"GameRendererAccessor",
-		"ScreenAccessor"
+		"ScreenAccessor",
+		"ProfilerPieChartMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
