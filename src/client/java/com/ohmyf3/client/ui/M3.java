@@ -26,6 +26,8 @@ public final class M3 {
 	public static final int SURFACE_CONTAINER_HIGHEST = 0xFF36343B;
 	public static final int ON_SURFACE = 0xFFE6E0E9;
 	public static final int ON_SURFACE_VARIANT = 0xFFCAC4D0;
+	/** Supporting text that has to stay legible on the darker containers. */
+	public static final int ON_SURFACE_VARIANT_BRIGHT = 0xFFDBD5E0;
 	public static final int OUTLINE = 0xFF938F99;
 	public static final int OUTLINE_VARIANT = 0xFF49454F;
 	public static final int ERROR = 0xFFF2B8B5;
@@ -44,8 +46,8 @@ public final class M3 {
 	}
 
 	/** Screen scrim: Material's modal background, so the world behind stays visible but muted. */
-	public static void scrim(GuiGraphicsExtractor graphics, int width, int height) {
-		graphics.fill(0, 0, width, height, 0x99000000);
+	public static void scrim(GuiGraphicsExtractor graphics, int width, int height, float fade) {
+		graphics.fill(0, 0, width, height, Anim.alpha(0x99000000, fade));
 	}
 
 	public static void panel(GuiGraphicsExtractor graphics, int x, int y, int width, int height) {
@@ -74,51 +76,67 @@ public final class M3 {
 	public static void switchRow(GuiGraphicsExtractor graphics, int x, int y, int width, String label, String detail,
 			boolean value, boolean hovered) {
 		int height = ROW_HEIGHT;
-		Shapes.filled(graphics, x, y, width, height, RADIUS_LARGE,
-				hovered ? SURFACE_CONTAINER_HIGHEST : SURFACE_CONTAINER_HIGH);
+		float hover = Anim.value("row:" + label, hovered ? 1.0F : 0.0F);
+		float on = Anim.value("switch:" + label, value ? 1.0F : 0.0F);
 
+		Shapes.filled(graphics, x, y, width, height, RADIUS_LARGE,
+				Anim.mix(SURFACE_CONTAINER_HIGH, SURFACE_CONTAINER_HIGHEST, hover));
+
+		// Supporting text has to stay above the "barely visible" line: the container is already
+		// dark, so this uses the bright variant of onSurfaceVariant rather than a dimmed outline.
 		TtfTextRenderer.drawString(graphics, label, x + 16, y + 17, ON_SURFACE);
 		TtfTextRenderer.drawString(graphics, detail, x + 16, y + 30,
-				hovered ? ON_SURFACE_VARIANT : OUTLINE_VARIANT + 0x20202020);
+				Anim.mix(ON_SURFACE_VARIANT, ON_SURFACE_VARIANT_BRIGHT, hover));
 
-		drawSwitch(graphics, x + width - 16 - 34, y + (height - 20) / 2, value);
+		drawSwitch(graphics, x + width - 16 - 34, y + (height - 20) / 2.0F, on);
 	}
 
-	/** M3 switch: pill track, circular thumb, tonal colours. */
-	public static void drawSwitch(GuiGraphicsExtractor graphics, int x, int y, boolean on) {
+	/**
+	 * M3 switch: pill track, circular thumb, tonal colours.
+	 *
+	 * @param on 0 = off, 1 = on; the thumb and the track colours interpolate between them, so the
+	 *           caller can drive a real transition instead of a hard flip
+	 */
+	public static void drawSwitch(GuiGraphicsExtractor graphics, int x, float y, float on) {
 		int trackWidth = 34;
 		int trackHeight = 20;
-		int track = on ? PRIMARY : SURFACE_CONTAINER_HIGHEST;
-		int trackOutline = on ? PRIMARY : OUTLINE;
+		float clamped = Math.max(0.0F, Math.min(on, 1.0F));
 
-		Shapes.outlined(graphics, x, y, trackWidth, trackHeight, trackHeight / 2, track, trackOutline);
+		int track = Anim.mix(SURFACE_CONTAINER_HIGHEST, PRIMARY, clamped);
+		int trackOutline = Anim.mix(OUTLINE, PRIMARY, clamped);
+		Shapes.outlined(graphics, x, Math.round(y), trackWidth, trackHeight, trackHeight / 2, track, trackOutline);
 
 		float thumbRadius = 7.0F;
-		float thumbCenterX = on ? x + trackWidth - 1 - thumbRadius : x + 1 + thumbRadius;
-		Shapes.circle(graphics, thumbCenterX, y + trackHeight / 2.0F, thumbRadius, on ? ON_PRIMARY : OUTLINE);
+		float travel = trackWidth - 2 - thumbRadius * 2;
+		float thumbCenterX = x + 1 + thumbRadius + travel * clamped;
+		Shapes.circle(graphics, thumbCenterX, y + trackHeight / 2.0F, thumbRadius,
+				Anim.mix(OUTLINE, ON_PRIMARY, clamped));
 	}
 
 	/** Filled tonal button; returns nothing, the caller owns hit-testing. */
 	public static void filledButton(GuiGraphicsExtractor graphics, int x, int y, int width, int height, String label,
 			boolean hovered) {
-		Shapes.filled(graphics, x, y, width, height, height / 2, hovered ? PRIMARY_CONTAINER : PRIMARY);
+		float hover = Anim.value("btn:" + label, hovered ? 1.0F : 0.0F);
+		Shapes.filled(graphics, x, y, width, height, height / 2, Anim.mix(PRIMARY, PRIMARY_CONTAINER, hover));
 		int textWidth = TtfTextRenderer.stringWidth(label);
 		TtfTextRenderer.drawString(graphics, label, x + (width - textWidth) / 2.0F,
 				Math.round(y + height / 2.0F + TtfTextRenderer.lineHeight() / 2.0F - 2),
-				hovered ? ON_PRIMARY_CONTAINER : ON_PRIMARY);
+				Anim.mix(ON_PRIMARY, ON_PRIMARY_CONTAINER, hover));
 	}
 
 	/** Text button (no fill), used for the secondary actions. */
 	public static void textButton(GuiGraphicsExtractor graphics, int x, int y, int width, int height, String label,
 			boolean hovered) {
-		if (hovered) {
-			Shapes.filled(graphics, x, y, width, height, height / 2, SURFACE_CONTAINER_HIGHEST);
+		float hover = Anim.value("btn:" + label, hovered ? 1.0F : 0.0F);
+
+		if (hover > 0.01F) {
+			Shapes.filled(graphics, x, y, width, height, height / 2, Anim.alpha(SURFACE_CONTAINER_HIGHEST, hover));
 		}
 
 		int textWidth = TtfTextRenderer.stringWidth(label);
 		TtfTextRenderer.drawString(graphics, label, x + (width - textWidth) / 2.0F,
 				Math.round(y + height / 2.0F + TtfTextRenderer.lineHeight() / 2.0F - 2),
-				hovered ? ON_SURFACE : ON_SURFACE_VARIANT);
+				Anim.mix(ON_SURFACE_VARIANT_BRIGHT, ON_SURFACE, hover));
 	}
 
 	/** Filled tonal "chip" for the layout-edit mode banner. */

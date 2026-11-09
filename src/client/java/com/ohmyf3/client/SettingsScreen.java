@@ -37,6 +37,8 @@ public final class SettingsScreen extends Screen {
 	/** Left mouse button in the {@code InputConstants} numbering used by {@code MouseButtonEvent}. */
 	private static final int LEFT_BUTTON = 1;
 
+	private static final String OPEN_ANIM = "screen:open";
+
 	private static final String PART_HEADER = "header";
 	private static final String PART_APPEARANCE = "appearance";
 	private static final String PART_EFFECTS = "effects";
@@ -76,7 +78,8 @@ public final class SettingsScreen extends Screen {
 
 	public SettingsScreen() {
 		super(Component.literal("OhMyF3 设置"));
-		OhMyF3.LOGGER.info("settings screen opened");
+		// Entrance motion: the panel rises into place over ~200 ms instead of popping in.
+		com.ohmyf3.client.ui.Anim.seed(OPEN_ANIM, 0.0F);
 	}
 
 	@Override
@@ -145,7 +148,13 @@ public final class SettingsScreen extends Screen {
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partial) {
 		int guiScale = Minecraft.getInstance().getWindow().getGuiScale();
 		TtfTextRenderer.ensureDeviceScale(guiScale);
-		M3.scrim(graphics, this.width, this.height);
+		float open = com.ohmyf3.client.ui.Anim.value(OPEN_ANIM, 1.0F);
+		M3.scrim(graphics, this.width, this.height, open);
+
+		// Slide up from 10px below; integer offsets keep the text crisp.
+		int lift = Math.round((1.0F - open) * 10.0F);
+		graphics.pose().pushMatrix();
+		graphics.pose().translate(0.0F, lift);
 		M3.panel(graphics, panelX(), panelY(), PANEL_WIDTH, panelHeight());
 
 		List<Part> parts = parts();
@@ -164,6 +173,8 @@ public final class SettingsScreen extends Screen {
 			M3.chip(graphics, panelX() + PANEL_WIDTH - 108, panelY() - 26, "拖动分区调整位置",
 					M3.PRIMARY_CONTAINER, M3.ON_PRIMARY_CONTAINER);
 		}
+
+		graphics.pose().popMatrix();
 	}
 
 	private void renderHeader(GuiGraphicsExtractor graphics, Part part) {
