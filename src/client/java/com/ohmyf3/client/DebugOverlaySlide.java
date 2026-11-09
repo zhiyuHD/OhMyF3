@@ -28,6 +28,7 @@ public final class DebugOverlaySlide {
 
 	/** Called once per rendered frame, before either column is extracted. */
 	public static void update(boolean visible, long nowNanos) {
+
 		if (!OhMyF3Config.get().slideAnimation) {
 			openness = visible ? 1.0F : 0.0F;
 			return;

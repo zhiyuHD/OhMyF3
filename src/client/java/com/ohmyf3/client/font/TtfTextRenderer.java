@@ -116,6 +116,8 @@ public final class TtfTextRenderer {
 	private static List<Row> lastRightRows = List.of();
 	private static int lastLeftWidth;
 	private static int lastRightWidth;
+	private static int lastLeftCardWidth;
+	private static int lastRightCardWidth;
 	private static float lastPoseScale = 1.0F;
 
 
@@ -175,21 +177,22 @@ public final class TtfTextRenderer {
 		// reopening) keeps moving smoothly.
 		float offset = DebugOverlaySlide.offset();
 
-		if (offset <= 0.001F || (lastLeftRows.isEmpty() && lastRightRows.isEmpty())) {
+		// Only replay while the close is actually in progress. Once the value settles fully
+		// displaced there is nothing left to show; drawing then would leave the columns
+		// hanging half off-screen for good.
+		if (offset >= 0.999F || (lastLeftRows.isEmpty() && lastRightRows.isEmpty())) {
 			return;
 		}
-
-		float distance = offset * DebugOverlaySlide.DISTANCE;
 
 		graphics.pose().pushMatrix();
 		graphics.pose().scale(lastPoseScale, lastPoseScale);
 
 		if (!lastLeftRows.isEmpty()) {
-			drawColumn(graphics, lastLeftRows, true, lastLeftWidth, -distance);
+			drawColumn(graphics, lastLeftRows, true, lastLeftWidth, -offset * travel(true));
 		}
 
 		if (!lastRightRows.isEmpty()) {
-			drawColumn(graphics, lastRightRows, false, lastRightWidth, distance);
+			drawColumn(graphics, lastRightRows, false, lastRightWidth, offset * travel(false));
 		}
 
 		graphics.pose().popMatrix();
@@ -307,6 +310,13 @@ public final class TtfTextRenderer {
 		}
 
 		int cardWidth = widest;
+
+		if (alignLeft) {
+			lastLeftCardWidth = cardWidth;
+		} else {
+			lastRightCardWidth = cardWidth;
+		}
+
 		int x = (alignLeft ? 2 : screenWidth - 2 - cardWidth) + Math.round(xOffset);
 		int y = 2;
 
@@ -408,6 +418,17 @@ public final class TtfTextRenderer {
 		// Centre.
 		blitRegion(graphics, texture, source, source, right, bottom, x + corner, y + corner,
 				x + width - corner, y + height - corner);
+	}
+
+	/**
+	 * How far a column has to travel to be fully off-screen.
+	 *
+	 * <p>A fixed distance is not enough: cards are as wide as their content, so a 200px slide
+	 * can leave a wide card half visible at the end of the animation.
+	 */
+	public static float travel(boolean alignLeft) {
+		int cardWidth = alignLeft ? lastLeftCardWidth : lastRightCardWidth;
+		return Math.max(DebugOverlaySlide.DISTANCE, cardWidth + 16.0F);
 	}
 
 	/** Draws the blurred copy inside the card, inset so the rounded corners stay clean. */

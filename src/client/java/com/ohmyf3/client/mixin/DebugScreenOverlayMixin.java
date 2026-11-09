@@ -51,7 +51,7 @@ public abstract class DebugScreenOverlayMixin {
 
 			Matrix3x2fStack pose = graphics.pose();
 			pose.pushMatrix();
-			pose.translate(direction * offset * DebugOverlaySlide.DISTANCE, 0.0F);
+			pose.translate(direction * offset * TtfTextRenderer.travel(alignLeft), 0.0F);
 			pushed = true;
 		}
 
