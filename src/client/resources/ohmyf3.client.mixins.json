@@ -6,7 +6,9 @@
 		"DebugScreenOverlayMixin",
 		"HudMixin",
 		"DebugScreenEntriesMixin",
-		"DebugScreenDisplayerMixin"
+		"DebugScreenDisplayerMixin",
+		"GuiRendererMixin",
+		"GameRendererAccessor"
 	],
 	"injectors": {
 		"defaultRequire": 1

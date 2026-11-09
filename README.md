@@ -107,12 +107,20 @@ The content itself is rebuilt around icons rather than decorated with them:
 - values form a real column: each card aligns them at the widest key, so the numbers line up;
 - blank lines still separate groups, and each group is a **rounded card** (nine-slice texture
   generated in code: fill `0xC8141418`, 1px border, 6px radius);
-- the backdrop is **blurred** behind the cards via the GUI render state's once-per-frame
-  `blurBeforeThisStratum()`; if anything else already used the frame's blur the overlay simply
-  draws sharp;
+- the backdrop behind the cards is blurred with the engine's own `minecraft:blur` post chain,
+  run over a **copy** of the main target so only the card areas end up blurred;
 - every row has a fixed **icon gutter**, tinted per category;
 - rows that are not vanilla fields go into a separate **Mods card** at the end of the column,
   with an amber border and a `Mods` header.
+
+### Card-limited blur
+
+Vanilla's blur (`GameRenderer.processBlurEffect`) runs the `minecraft:blur` post chain straight
+on the main render target, so it can only ever blur the whole screen. `BackdropBlur` runs the
+same chain on a target we own instead: `RenderTarget.copyColorFrom` copies the frame at the
+start of the GUI pass (before any card is drawn), the chain blurs the copy in place, and the
+cards sample that copy through their own UVs. No raw GL is involved — an earlier attempt that
+called `glBlitFramebuffer`/`glReadPixels` directly aborted the JVM on this renderer.
 
 ### Telling mod rows apart
 

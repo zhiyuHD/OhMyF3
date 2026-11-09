@@ -133,6 +133,11 @@ public final class TtfTextRenderer {
 		return ready;
 	}
 
+	/** Sampling state shared with the backdrop blur (linear, clamped). */
+	public static GpuSampler sampler() {
+		return sampler;
+	}
+
 	public static int lineHeight() {
 		return lineHeight;
 	}
@@ -293,6 +298,7 @@ public final class TtfTextRenderer {
 			return;
 		}
 
+		drawBlurredBackdrop(graphics, x, y, width, height);
 		blitNineSlice(graphics, cardFill, x, y, width, height);
 
 		GlyphAtlas.Rect border = mods && cardBorderMods != null ? cardBorderMods : cardBorder;
@@ -337,6 +343,37 @@ public final class TtfTextRenderer {
 		// Centre.
 		blitRegion(graphics, texture, source, source, right, bottom, x + corner, y + corner,
 				x + width - corner, y + height - corner);
+	}
+
+	/** Draws the blurred copy inside the card, inset so the rounded corners stay clean. */
+	private static void drawBlurredBackdrop(GuiGraphicsExtractor graphics, int x, int y, int width, int height) {
+		if (!BackdropBlur.isReady()) {
+			return;
+		}
+
+		int inset = Math.max(1, CARD_RADIUS / 2);
+		int x0 = x + inset;
+		int y0 = y + inset;
+		int x1 = x + width - inset;
+		int y1 = y + height - inset;
+
+		if (x1 <= x0 || y1 <= y0) {
+			return;
+		}
+
+		float screenWidth = Minecraft.getInstance().getWindow().getWidth();
+		float screenHeight = Minecraft.getInstance().getWindow().getHeight();
+
+		if (screenWidth <= 0 || screenHeight <= 0) {
+			return;
+		}
+
+		float u0 = Math.max(0.0F, Math.min(1.0F, x0 * guiToScreen / screenWidth));
+		float u1 = Math.max(0.0F, Math.min(1.0F, x1 * guiToScreen / screenWidth));
+		float v0 = Math.max(0.0F, Math.min(1.0F, y0 * guiToScreen / screenHeight));
+		float v1 = Math.max(0.0F, Math.min(1.0F, y1 * guiToScreen / screenHeight));
+
+		graphics.blit(BackdropBlur.view(), BackdropBlur.sampler(), x0, y0, x1, y1, u0, u1, v0, v1);
 	}
 
 	private static void blitRegion(GuiGraphicsExtractor graphics, GlyphAtlas.Rect texture, int sx0, int sy0,
