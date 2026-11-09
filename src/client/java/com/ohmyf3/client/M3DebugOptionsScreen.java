@@ -1,0 +1,319 @@
+package com.ohmyf3.client;
+
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+
+import com.ohmyf3.client.font.TtfTextRenderer;
+import com.ohmyf3.client.ui.Anim;
+import com.ohmyf3.client.ui.M3;
+import com.ohmyf3.client.ui.Shapes;
+
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.debug.DebugEntryCategory;
+import net.minecraft.client.gui.components.debug.DebugScreenEntries;
+import net.minecraft.client.gui.components.debug.DebugScreenEntry;
+import net.minecraft.client.gui.components.debug.DebugScreenEntryList;
+import net.minecraft.client.gui.components.debug.DebugScreenEntryStatus;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
+
+/**
+ * Material 3 replacement for the vanilla F3 display-options screen.
+ *
+ * <p>Vanilla's screen is a vanilla-styled checkbox list behind a search box. This keeps the same
+ * data — the entry registry and its per-entry {@link DebugScreenEntryStatus} — but presents it the
+ * way the rest of the mod does: grouped by category, one M3 switch per entry, with bulk actions for
+ * the common "everything off" case that causes the "my F3 is missing rows" confusion.
+ */
+public final class M3DebugOptionsScreen extends Screen {
+	private static final int LEFT_BUTTON = 1;
+	private static final int PANEL_WIDTH = 420;
+	private static final int PADDING = 20;
+	private static final int ROW_HEIGHT = 30;
+	private static final int HEADER_HEIGHT = 26;
+	private static final int FOOTER_HEIGHT = 32;
+
+	private record Entry(Identifier id, DebugScreenEntry entry, Component label, DebugEntryCategory category) {
+	}
+
+	private final List<Entry> entries = new ArrayList<>();
+	private final List<Button> buttons = new ArrayList<>();
+
+	private int scroll;
+
+	private record Button(String key, String label, int x, int y, int width, int height, boolean filled) {
+	}
+
+	public M3DebugOptionsScreen() {
+		super(Component.literal("F3 显示项"));
+		load();
+		com.ohmyf3.OhMyF3.LOGGER.info("M3 debug options opened ({} entries)", entries.size());
+	}
+
+	private void load() {
+		for (Map.Entry<Identifier, DebugScreenEntry> item : DebugScreenEntries.allEntries().entrySet()) {
+			DebugScreenEntry entry = item.getValue();
+			DebugEntryCategory category = entry.category();
+			entries.add(new Entry(item.getKey(), entry, category.label(), category));
+		}
+
+		entries.sort(Comparator.comparing((Entry e) -> e.category().sortKey())
+				.thenComparing(e -> e.id().toString()));
+	}
+
+	// ---------------------------------------------------------------- geometry
+
+	private int panelHeight() {
+		return Math.min(this.height - 32, 400);
+	}
+
+	private int panelX() {
+		return this.width / 2 - PANEL_WIDTH / 2;
+	}
+
+	private int panelY() {
+		return this.height / 2 - panelHeight() / 2;
+	}
+
+	private int listTop() {
+		return panelY() + PADDING + HEADER_HEIGHT + 8;
+	}
+
+	private int listBottom() {
+		return panelY() + panelHeight() - PADDING - FOOTER_HEIGHT - 8;
+	}
+
+	private int visibleRows() {
+		return Math.max(1, (listBottom() - listTop()) / ROW_HEIGHT);
+	}
+
+	private int maxScroll() {
+		return Math.max(0, entries.size() - visibleRows());
+	}
+
+	// ---------------------------------------------------------------- drawing
+
+	@Override
+	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partial) {
+		TtfTextRenderer.ensureDeviceScale(Minecraft.getInstance().getWindow().getGuiScale());
+		M3.scrim(graphics, this.width, this.height, 1.0F);
+
+		int x = panelX();
+		int y = panelY();
+		int height = panelHeight();
+		M3.panel(graphics, x, y, PANEL_WIDTH, height);
+
+		TtfTextRenderer.drawString(graphics, "F3 显示项", x + PADDING, y + PADDING + 10, M3.ON_SURFACE);
+		TtfTextRenderer.drawString(graphics,
+				"关掉的条目不会出现在 F3 里 · 共 " + entries.size() + " 项",
+				x + PADDING, y + PADDING + 24, M3.ON_SURFACE_VARIANT_BRIGHT);
+
+		renderList(graphics, mouseX, mouseY);
+		renderFooter(graphics, mouseX, mouseY);
+	}
+
+	private void renderList(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		DebugScreenEntryList statuses = Minecraft.getInstance().debugEntries;
+		int x = panelX() + PADDING;
+		int width = PANEL_WIDTH - PADDING * 2;
+		int rowY = listTop();
+		int limit = listBottom();
+
+		graphics.enableScissor(x, listTop(), x + width, limit);
+
+		DebugEntryCategory lastCategory = null;
+
+		for (int i = scroll; i < entries.size() && rowY < limit; i++) {
+			Entry entry = entries.get(i);
+
+			if (lastCategory == null || !lastCategory.equals(entry.category())) {
+				lastCategory = entry.category();
+
+				if (rowY + HEADER_HEIGHT > limit) {
+					rowY += HEADER_HEIGHT;
+					continue;
+				}
+
+				M3.section(graphics, entry.label().getString(), x + 4, rowY + 9);
+				rowY += HEADER_HEIGHT;
+			}
+
+			if (rowY + ROW_HEIGHT > limit) {
+				break;
+			}
+
+			boolean on = statuses.getStatus(entry.id()) != DebugScreenEntryStatus.NEVER;
+			boolean hovered = M3.inside(mouseX, mouseY, x, rowY, width, ROW_HEIGHT - 4);
+			M3.switchRow(graphics, x, rowY, width, shortName(entry.id()), entry.id().getNamespace(),
+					on, hovered);
+			rowY += ROW_HEIGHT;
+		}
+
+		graphics.disableScissor();
+
+		if (maxScroll() > 0) {
+			int trackHeight = limit - listTop();
+			int thumbHeight = Math.max(18, trackHeight * visibleRows() / entries.size());
+			int thumbY = listTop() + (trackHeight - thumbHeight) * scroll / maxScroll();
+			Shapes.filled(graphics, x + width - 4, thumbY, 3, thumbHeight, 2, M3.OUTLINE_VARIANT);
+		}
+	}
+
+	private void renderFooter(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		int x = panelX() + PADDING;
+		int y = panelY() + panelHeight() - PADDING - FOOTER_HEIGHT;
+		int doneWidth = 80;
+		int allOnWidth = 92;
+		int allOffWidth = 92;
+
+		buttons.clear();
+		buttons.add(new Button("done", "完成", x, y, doneWidth, FOOTER_HEIGHT, true));
+		buttons.add(new Button("allOn", "全部开启", x + doneWidth + 8, y, allOnWidth, FOOTER_HEIGHT, false));
+		buttons.add(new Button("allOff", "全部关闭", x + doneWidth + allOnWidth + 16, y, allOffWidth, FOOTER_HEIGHT,
+				false));
+
+		for (Button button : buttons) {
+			boolean hovered = M3.inside(mouseX, mouseY, button.x(), button.y(), button.width(), button.height());
+
+			if (button.filled()) {
+				M3.filledButton(graphics, button.x(), button.y(), button.width(), button.height(), button.label(),
+						hovered);
+			} else {
+				M3.textButton(graphics, button.x(), button.y(), button.width(), button.height(), button.label(),
+						hovered);
+			}
+
+			M3.drawRipple(graphics, "btn:" + button.key(), button.x(), button.y(), button.width(), button.height());
+		}
+	}
+
+	/** Shows the part of the id that differs; the namespace is drawn as the supporting line. */
+	private static String shortName(Identifier id) {
+		return id.getPath().replace('_', ' ');
+	}
+
+	// ---------------------------------------------------------------- input
+
+	@Override
+	public boolean mouseClicked(MouseButtonEvent event, boolean quickMove) {
+		double mouseX = event.x();
+		double mouseY = event.y();
+
+		if (event.button() != LEFT_BUTTON) {
+			return super.mouseClicked(event, quickMove);
+		}
+
+		for (Button button : buttons) {
+			if (M3.inside(mouseX, mouseY, button.x(), button.y(), button.width(), button.height())) {
+				M3.ripple("btn:" + button.key(), mouseX, mouseY);
+				onButton(button.key());
+				return true;
+			}
+		}
+
+		Entry clicked = entryAt(mouseX, mouseY);
+
+		if (clicked != null) {
+			DebugScreenEntryList statuses = Minecraft.getInstance().debugEntries;
+			boolean on = statuses.getStatus(clicked.id()) != DebugScreenEntryStatus.NEVER;
+			statuses.setStatus(clicked.id(), on ? DebugScreenEntryStatus.NEVER : DebugScreenEntryStatus.IN_OVERLAY);
+			statuses.save();
+			return true;
+		}
+
+		return super.mouseClicked(event, quickMove);
+	}
+
+	/** Which entry's row is under the pointer, using the same layout the renderer just drew. */
+	private Entry entryAt(double mouseX, double mouseY) {
+		int x = panelX() + PADDING;
+		int width = PANEL_WIDTH - PADDING * 2;
+		int rowY = listTop();
+		DebugEntryCategory lastCategory = null;
+
+		for (int i = scroll; i < entries.size(); i++) {
+			Entry entry = entries.get(i);
+
+			if (lastCategory == null || !lastCategory.equals(entry.category())) {
+				lastCategory = entry.category();
+				rowY += HEADER_HEIGHT;
+			}
+
+			if (rowY + ROW_HEIGHT > listBottom()) {
+				return null;
+			}
+
+			if (M3.inside(mouseX, mouseY, x, rowY, width, ROW_HEIGHT - 4)) {
+				return entry;
+			}
+
+			rowY += ROW_HEIGHT;
+		}
+
+		return null;
+	}
+
+	@Override
+	public boolean mouseScrolled(double mouseX, double mouseY, double horizontal, double vertical) {
+		if (mouseY >= listTop() && mouseY <= listBottom()) {
+			scroll = Math.max(0, Math.min(maxScroll(), scroll - (int) Math.signum(vertical)));
+			return true;
+		}
+
+		return super.mouseScrolled(mouseX, mouseY, horizontal, vertical);
+	}
+
+	private void onButton(String key) {
+		DebugScreenEntryList statuses = Minecraft.getInstance().debugEntries;
+
+		switch (key) {
+			case "done" -> close();
+			case "allOn" -> {
+				for (Entry entry : entries) {
+					statuses.setStatus(entry.id(), DebugScreenEntryStatus.IN_OVERLAY);
+				}
+
+				statuses.save();
+			}
+			case "allOff" -> {
+				for (Entry entry : entries) {
+					statuses.setStatus(entry.id(), DebugScreenEntryStatus.NEVER);
+				}
+
+				statuses.save();
+			}
+			default -> {
+			}
+		}
+	}
+
+	@Override
+	public boolean keyPressed(KeyEvent event) {
+		if (event.input() == 256) {
+			close();
+			return true;
+		}
+
+		return super.keyPressed(event);
+	}
+
+	private void close() {
+		Minecraft.getInstance().setScreenAndShow(null);
+	}
+
+	@Override
+	public void onClose() {
+		close();
+	}
+
+	@Override
+	public boolean isPauseScreen() {
+		return true;
+	}
+}

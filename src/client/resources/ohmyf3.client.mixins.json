@@ -10,7 +10,8 @@
 		"GuiRendererMixin",
 		"GameRendererAccessor",
 		"ScreenAccessor",
-		"ProfilerPieChartMixin"
+		"ProfilerPieChartMixin",
+		"MinecraftScreenMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
