@@ -95,13 +95,13 @@ public final class TtfTextRenderer {
 
 	private static int deviceScale = -1;
 
+	/** Screen pixels per GUI unit (does not need to be an integer). */
+	private static float guiToScreen = 1.0F;
+
 	private static final Map<GlyphKey, Sprite> GLYPHS = new HashMap<>();
 	private static final Map<IconKey, Sprite> ICONS = new HashMap<>();
 
 	private static List<String> lastModRows = List.of();
-
-	/** The GUI render state allows exactly one blur per frame. */
-	private static boolean blurredThisFrame;
 
 	private static GlyphAtlas.Rect cardFill;
 	private static GlyphAtlas.Rect cardBorder;
@@ -139,7 +139,8 @@ public final class TtfTextRenderer {
 
 	/** Called once per frame, before the overlay assembles its columns. */
 	public static void beginFrame() {
-		blurredThisFrame = false;
+		// The backdrop texture is refreshed by BackdropBlur at GUI-render time; nothing to
+		// reset here yet, but the hook keeps the frame boundaries explicit.
 	}
 
 	public static void drawLines(GuiGraphicsExtractor graphics, List<String> lines, boolean alignLeft,
@@ -152,6 +153,8 @@ public final class TtfTextRenderer {
 
 		float poseScale = graphics.pose().m00();
 		int target = Math.max(1, Math.round(Minecraft.getInstance().getWindow().getGuiScale() * poseScale));
+
+		guiToScreen = Minecraft.getInstance().getWindow().getGuiScale() * poseScale;
 
 		if (target != deviceScale) {
 			rebuildAtlas(target);
@@ -174,19 +177,6 @@ public final class TtfTextRenderer {
 
 		if (alignLeft) {
 			logModRows(rows);
-		}
-
-		if (!rows.isEmpty() && !blurredThisFrame) {
-			blurredThisFrame = true;
-
-			try {
-				// Blurs everything recorded before this stratum, so the world and the rest of
-				// the HUD sit behind the cards out of focus.
-				graphics.blurBeforeThisStratum();
-			} catch (Throwable throwable) {
-				// Another screen already used the frame's single blur; draw sharp instead.
-				LOGGER.debug("backdrop blur unavailable", throwable);
-			}
 		}
 
 		drawColumn(graphics, rows, alignLeft, screenWidth);
