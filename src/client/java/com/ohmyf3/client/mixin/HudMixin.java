@@ -1,6 +1,7 @@
 package com.ohmyf3.client.mixin;
 
 import com.ohmyf3.client.DebugOverlaySlide;
+import com.ohmyf3.client.font.TtfTextRenderer;
 
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.Hud;
@@ -34,6 +35,12 @@ public abstract class HudMixin {
 	@Inject(method = "extractDebugOverlay", at = @At("HEAD"))
 	private void ohmyf3$sampleSlideClock(GuiGraphicsExtractor extractor, CallbackInfo ci) {
 		// showDebugScreen() is the same visibility check the overlay itself uses.
-		DebugOverlaySlide.update(this.debugOverlay.showDebugScreen(), System.nanoTime());
+		boolean visible = this.debugOverlay.showDebugScreen();
+		long now = System.nanoTime();
+
+		DebugOverlaySlide.update(visible, now);
+		// Runs every frame, including while the overlay is hidden, which is what lets the
+		// columns slide out after vanilla has already stopped extracting them.
+		TtfTextRenderer.onFrame(visible, extractor, now);
 	}
 }

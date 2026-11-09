@@ -11,6 +11,9 @@ import java.util.List;
 import java.util.Map;
 
 import com.ohmyf3.client.DebugEntryOrigin;
+import com.ohmyf3.client.DebugOverlaySlide;
+import com.ohmyf3.config.OhMyF3Config;
+import com.ohmyf3.font.Labels;
 import com.ohmyf3.font.CoverageBitmap;
 import com.ohmyf3.font.EntryClassifier;
 import com.ohmyf3.font.GlyphOutline;
@@ -56,6 +59,11 @@ public final class TtfTextRenderer {
 	private static final int CARD_RADIUS = 6;
 	/** Width reserved for the icon column. */
 	private static final int GUTTER = ICON_SIZE + ICON_GAP;
+
+	/** Width of the icon column, which disappears entirely when icons are disabled. */
+	private static int gutter() {
+		return OhMyF3Config.get().icons ? GUTTER : 0;
+	}
 
 	private static final int CARD_FILL = 0xC8141418;
 	private static final int CARD_BORDER = 0x2AFFFFFF;
@@ -103,6 +111,18 @@ public final class TtfTextRenderer {
 
 	private static List<String> lastModRows = List.of();
 
+	/** Last drawn columns, replayed while the overlay slides out. */
+	private static List<Row> lastLeftRows = List.of();
+	private static List<Row> lastRightRows = List.of();
+	private static int lastLeftWidth;
+	private static int lastRightWidth;
+	private static float lastPoseScale = 1.0F;
+
+	private static final long CLOSE_DURATION_NANOS = 320_000_000L;
+	private static boolean wasVisible;
+	private static boolean closing;
+	private static long closeStartNanos;
+
 	private static GlyphAtlas.Rect cardFill;
 	private static GlyphAtlas.Rect cardBorder;
 	private static GlyphAtlas.Rect cardBorderMods;
@@ -140,6 +160,56 @@ public final class TtfTextRenderer {
 
 	public static int lineHeight() {
 		return lineHeight;
+	}
+
+	/**
+	 * Drives the slide-out animation.
+	 *
+	 * <p>Once the debug overlay is hidden, vanilla stops calling {@code extractLines} entirely,
+	 * so the last drawn columns are cached and replayed here by the per-frame HUD hook with an
+	 * outward offset until the animation ends.
+	 */
+	public static void onFrame(boolean visible, GuiGraphicsExtractor graphics, long nowNanos) {
+		if (visible) {
+			wasVisible = true;
+			closing = false;
+			return;
+		}
+
+		if (wasVisible) {
+			wasVisible = false;
+			closing = ready && OhMyF3Config.get().slideAnimation;
+			closeStartNanos = nowNanos;
+		}
+
+		if (!closing) {
+			return;
+		}
+
+		long elapsed = nowNanos - closeStartNanos;
+
+		if (elapsed >= CLOSE_DURATION_NANOS || (lastLeftRows.isEmpty() && lastRightRows.isEmpty())) {
+			closing = false;
+			return;
+		}
+
+		float progress = Math.max(0.0F, Math.min(1.0F, elapsed / (float) CLOSE_DURATION_NANOS));
+		// Accelerate outwards, mirroring the ease-out used when opening.
+		float eased = progress * progress * progress;
+		float offset = eased * DebugOverlaySlide.DISTANCE;
+
+		graphics.pose().pushMatrix();
+		graphics.pose().scale(lastPoseScale, lastPoseScale);
+
+		if (!lastLeftRows.isEmpty()) {
+			drawColumn(graphics, lastLeftRows, true, lastLeftWidth, -offset);
+		}
+
+		if (!lastRightRows.isEmpty()) {
+			drawColumn(graphics, lastRightRows, false, lastRightWidth, offset);
+		}
+
+		graphics.pose().popMatrix();
 	}
 
 	/** Called once per frame, before the overlay assembles its columns. */
@@ -184,13 +254,23 @@ public final class TtfTextRenderer {
 			logModRows(rows);
 		}
 
-		drawColumn(graphics, rows, alignLeft, screenWidth);
+		lastPoseScale = poseScale;
+
+		if (alignLeft) {
+			lastLeftRows = rows;
+			lastLeftWidth = screenWidth;
+		} else {
+			lastRightRows = rows;
+			lastRightWidth = screenWidth;
+		}
+
+		drawColumn(graphics, rows, alignLeft, screenWidth, 0.0F);
 	}
 
 	// ---------------------------------------------------------------- cards
 
 	private static void drawColumn(GuiGraphicsExtractor graphics, List<Row> rows, boolean alignLeft,
-			int screenWidth) {
+			int screenWidth, float xOffset) {
 		List<Card> cards = new ArrayList<>();
 		List<Row> current = new ArrayList<>();
 
@@ -226,7 +306,7 @@ public final class TtfTextRenderer {
 
 		if (!mods.isEmpty()) {
 			// A labelled card so third-party rows are clearly their own area.
-			Row header = new Row(null, List.of(), cellsFor("Mods", KEY_COLOR), false, true, "Mods");
+			Row header = new Row(null, List.of(), cellsFor(OhMyF3Config.get().chineseLabels ? "模组" : "Mods", KEY_COLOR), false, true, "Mods");
 			List<Row> withHeader = new ArrayList<>();
 			withHeader.add(header);
 			withHeader.addAll(mods);
@@ -244,7 +324,7 @@ public final class TtfTextRenderer {
 		}
 
 		int cardWidth = widest;
-		int x = alignLeft ? 2 : screenWidth - 2 - cardWidth;
+		int x = (alignLeft ? 2 : screenWidth - 2 - cardWidth) + Math.round(xOffset);
 		int y = 2;
 
 		for (Card card : cards) {
@@ -252,7 +332,7 @@ public final class TtfTextRenderer {
 			drawCard(graphics, x, y, cardWidth, height, card.mods());
 
 			int maxKey = maxKeyWidth(card);
-			int valueColumn = x + CARD_PADDING + GUTTER + (maxKey > 0 ? maxKey + KEY_GAP : 0);
+			int valueColumn = x + CARD_PADDING + gutter() + (maxKey > 0 ? maxKey + KEY_GAP : 0);
 
 			for (int index = 0; index < card.rows().size(); index++) {
 				drawRow(graphics, card.rows().get(index), x, y + CARD_PADDING + index * lineHeight, valueColumn);
@@ -275,7 +355,7 @@ public final class TtfTextRenderer {
 			maxRow = Math.max(maxRow, key + (key > 0 ? KEY_GAP : 0) + value);
 		}
 
-		return CARD_PADDING * 2 + GUTTER + maxRow;
+		return CARD_PADDING * 2 + gutter() + maxRow;
 	}
 
 	private static int maxKeyWidth(Card card) {
@@ -298,7 +378,9 @@ public final class TtfTextRenderer {
 			return;
 		}
 
-		drawBlurredBackdrop(graphics, x, y, width, height);
+		if (OhMyF3Config.get().blur) {
+			drawBlurredBackdrop(graphics, x, y, width, height);
+		}
 		blitNineSlice(graphics, cardFill, x, y, width, height);
 
 		GlyphAtlas.Rect border = mods && cardBorderMods != null ? cardBorderMods : cardBorder;
@@ -407,7 +489,7 @@ public final class TtfTextRenderer {
 			}
 		}
 
-		float penX = cardX + CARD_PADDING + GUTTER;
+		float penX = cardX + CARD_PADDING + gutter();
 		penX = drawCells(graphics, row.keyCells(), penX, baseline);
 
 		if (!row.valueCells().isEmpty()) {
@@ -505,16 +587,21 @@ public final class TtfTextRenderer {
 
 	private static Row layout(String line) {
 		EntryClassifier.Entry entry = EntryClassifier.classify(line);
+		OhMyF3Config config = OhMyF3Config.get();
 
-		List<Cell> keyCells = entry.key().isEmpty() ? List.of() : cellsFor(entry.key(), KEY_COLOR);
-		List<Cell> valueCells = cellsFor(entry.value(), DEFAULT_COLOR);
+		String key = config.chineseLabels ? Labels.key(entry.key()) : entry.key();
+		String value = config.chineseLabels ? Labels.value(entry.value()) : entry.value();
+
+		List<Cell> keyCells = key.isEmpty() ? List.of() : cellsFor(key, KEY_COLOR);
+		List<Cell> valueCells = cellsFor(value, DEFAULT_COLOR);
+		IconPainter.Icon icon = config.icons ? entry.icon() : null;
 
 		// Only rows whose owning entry registered outside the minecraft namespace are mod
 		// content. Untagged rows are synthesised by the overlay itself (separators, the
 		// "to edit" hints) and stay in the vanilla area.
 		boolean vanilla = !Boolean.TRUE.equals(DebugEntryOrigin.modded(line));
 
-		return new Row(entry.icon(), keyCells, valueCells, vanilla, false, line);
+		return new Row(icon, keyCells, valueCells, vanilla, false, line);
 	}
 
 	/** Splits text into glyph cells, honouring {@code §} colour codes. */

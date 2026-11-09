@@ -1,6 +1,7 @@
 package com.ohmyf3.client;
 
 import com.ohmyf3.animation.SlideInAnimation;
+import com.ohmyf3.config.OhMyF3Config;
 
 /**
  * Per-frame slide state shared between the HUD hook (which owns the clock) and the
@@ -26,6 +27,13 @@ public final class DebugOverlaySlide {
 
 	/** Called once per rendered frame, before either column is extracted. */
 	public static void update(boolean visible, long nowNanos) {
+		if (!OhMyF3Config.get().slideAnimation) {
+			// Still feed the animation so reopening later starts cleanly.
+			ANIMATION.offset(false, nowNanos);
+			offset = 0.0F;
+			return;
+		}
+
 		offset = ANIMATION.offset(visible, nowNanos);
 	}
 

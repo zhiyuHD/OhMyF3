@@ -8,7 +8,8 @@
 		"DebugScreenEntriesMixin",
 		"DebugScreenDisplayerMixin",
 		"GuiRendererMixin",
-		"GameRendererAccessor"
+		"GameRendererAccessor",
+		"ScreenAccessor"
 	],
 	"injectors": {
 		"defaultRequire": 1
