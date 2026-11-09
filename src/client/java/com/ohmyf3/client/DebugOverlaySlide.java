@@ -1,6 +1,6 @@
 package com.ohmyf3.client;
 
-import com.ohmyf3.animation.SlideInAnimation;
+import com.ohmyf3.animation.SlideAnimation;
 import com.ohmyf3.config.OhMyF3Config;
 
 /**
@@ -18,9 +18,10 @@ public final class DebugOverlaySlide {
 	/** How far each column starts outside its resting position, in GUI pixels. */
 	public static final float DISTANCE = 200.0F;
 
-	private static final SlideInAnimation ANIMATION = new SlideInAnimation(DURATION_NANOS);
+	private static final SlideAnimation ANIMATION = new SlideAnimation(DURATION_NANOS);
 
-	private static float offset;
+	/** 1 = fully open, 0 = fully displaced off-screen. */
+	private static float openness = 1.0F;
 
 	private DebugOverlaySlide() {
 	}
@@ -28,17 +29,18 @@ public final class DebugOverlaySlide {
 	/** Called once per rendered frame, before either column is extracted. */
 	public static void update(boolean visible, long nowNanos) {
 		if (!OhMyF3Config.get().slideAnimation) {
-			// Still feed the animation so reopening later starts cleanly.
-			ANIMATION.offset(false, nowNanos);
-			offset = 0.0F;
+			openness = visible ? 1.0F : 0.0F;
 			return;
 		}
 
-		offset = ANIMATION.offset(visible, nowNanos);
+		openness = ANIMATION.update(visible, nowNanos);
 	}
 
-	/** Current displacement factor in {@code [0, 1]}; {@code 0} means the columns are settled. */
+	/**
+	 * Displacement factor in {@code [0, 1]}: {@code 1} means fully off-screen (start of the
+	 * slide-in, end of the slide-out) and {@code 0} means settled.
+	 */
 	public static float offset() {
-		return offset;
+		return 1.0F - openness;
 	}
 }

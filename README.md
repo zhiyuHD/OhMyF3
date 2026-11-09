@@ -25,7 +25,7 @@ ease-out curve, instead of it popping into place.
 
 | File | Role |
 | --- | --- |
-| `src/main/java/com/ohmyf3/animation/SlideInAnimation.java` | Pure timing/easing math, no Minecraft types |
+| `src/main/java/com/ohmyf3/animation/SlideAnimation.java` | Retargetable open/close value, no Minecraft types |
 | `src/client/java/com/ohmyf3/client/mixin/HudMixin.java` | Applies the offset to the HUD extraction pose |
 | `src/test/java/com/ohmyf3/animation/SlideInAnimationTest.java` | Unit tests for the easing and the restart behaviour |
 
@@ -97,6 +97,17 @@ Two bugs worth remembering, both caught by checking output rather than trusting 
 - `new NativeImage(format, w, h, false)` leaves the buffer **uninitialised**; the unused
   atlas area then leaked garbage pixels into the texture and showed up as stray white
   blocks. The atlas is created with `true` (calloc).
+
+## Opening and closing animation
+
+A single "openness" value in `[0, 1]` drives both directions: it eases towards `1` while F3 is
+shown and towards `0` while it is hidden. Retargeting mid-flight starts a new segment **from the
+current value** with a duration proportional to the remaining distance, so pressing F3 again
+during either animation reverses smoothly instead of snapping to an endpoint.
+
+Closing needed one extra piece: vanilla stops calling `extractLines` the moment the overlay
+hides, so the columns drawn last are cached and replayed by the always-running HUD hook while
+the value is still above zero.
 
 ## Debug screen layout
 

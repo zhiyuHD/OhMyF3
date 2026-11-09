@@ -118,10 +118,6 @@ public final class TtfTextRenderer {
 	private static int lastRightWidth;
 	private static float lastPoseScale = 1.0F;
 
-	private static final long CLOSE_DURATION_NANOS = 320_000_000L;
-	private static boolean wasVisible;
-	private static boolean closing;
-	private static long closeStartNanos;
 
 	private static GlyphAtlas.Rect cardFill;
 	private static GlyphAtlas.Rect cardBorder;
@@ -170,43 +166,30 @@ public final class TtfTextRenderer {
 	 * outward offset until the animation ends.
 	 */
 	public static void onFrame(boolean visible, GuiGraphicsExtractor graphics, long nowNanos) {
-		if (visible) {
-			wasVisible = true;
-			closing = false;
+		if (visible || !ready) {
 			return;
 		}
 
-		if (wasVisible) {
-			wasVisible = false;
-			closing = ready && OhMyF3Config.get().slideAnimation;
-			closeStartNanos = nowNanos;
-		}
+		// Vanilla already stopped extracting the overlay, but the shared openness value may
+		// still be mid-flight: replay the last columns so closing (and a close interrupted by
+		// reopening) keeps moving smoothly.
+		float offset = DebugOverlaySlide.offset();
 
-		if (!closing) {
+		if (offset <= 0.001F || (lastLeftRows.isEmpty() && lastRightRows.isEmpty())) {
 			return;
 		}
 
-		long elapsed = nowNanos - closeStartNanos;
-
-		if (elapsed >= CLOSE_DURATION_NANOS || (lastLeftRows.isEmpty() && lastRightRows.isEmpty())) {
-			closing = false;
-			return;
-		}
-
-		float progress = Math.max(0.0F, Math.min(1.0F, elapsed / (float) CLOSE_DURATION_NANOS));
-		// Accelerate outwards, mirroring the ease-out used when opening.
-		float eased = progress * progress * progress;
-		float offset = eased * DebugOverlaySlide.DISTANCE;
+		float distance = offset * DebugOverlaySlide.DISTANCE;
 
 		graphics.pose().pushMatrix();
 		graphics.pose().scale(lastPoseScale, lastPoseScale);
 
 		if (!lastLeftRows.isEmpty()) {
-			drawColumn(graphics, lastLeftRows, true, lastLeftWidth, -offset);
+			drawColumn(graphics, lastLeftRows, true, lastLeftWidth, -distance);
 		}
 
 		if (!lastRightRows.isEmpty()) {
-			drawColumn(graphics, lastRightRows, false, lastRightWidth, offset);
+			drawColumn(graphics, lastRightRows, false, lastRightWidth, distance);
 		}
 
 		graphics.pose().popMatrix();
