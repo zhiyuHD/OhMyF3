@@ -36,3 +36,10 @@ replay_*.log
 .meta/
 .dev/
 .demo/
+
+# local analysis / scratch (never part of the mod)
+.api/
+.decomp/
+.loomx/
+.demo-server/
+.attach_pid*
