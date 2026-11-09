@@ -3,8 +3,8 @@ package com.ohmyf3.client;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.ohmyf3.OhMyF3;
 import com.ohmyf3.client.font.TtfTextRenderer;
+import com.ohmyf3.client.ui.Anim;
 import com.ohmyf3.client.ui.M3;
 import com.ohmyf3.client.ui.Shapes;
 import com.ohmyf3.config.OhMyF3Config;
@@ -19,67 +19,64 @@ import net.minecraft.network.chat.Component;
 /**
  * Material 3 settings screen.
  *
- * <p>Four layout <em>parts</em> (header, appearance, effects, footer) are stacked by default and
- * can each be dragged elsewhere in "adjust layout" mode; every part's offset is stored in
- * {@link OhMyF3Config#layout} and a single button restores the defaults.
- *
- * <p>All painting is custom (no vanilla widgets) so the screen matches the F3 cards: TrueType
- * text, rounded tonal surfaces, M3 switches.
+ * <p>Two modes. Normally it is a list of M3 list items with switches. In <em>layout mode</em> the
+ * list is replaced by a miniature of the F3 screen where the three things the player can move — the
+ * left column, the right column and the profiler pie — are dragged into place. The offsets are
+ * stored in {@link OhMyF3Config#layout} and applied by the F3 renderer itself, so the editor changes
+ * the real overlay rather than this screen's own arrangement.
  */
 public final class SettingsScreen extends Screen {
+	/** Left mouse button in the {@code InputConstants} numbering used by {@code MouseButtonEvent}. */
+	private static final int LEFT_BUTTON = 1;
+
 	private static final int PANEL_WIDTH = 372;
 	private static final int PADDING = 24;
-	private static final int PART_GAP = 12;
+	private static final int GAP = 12;
 	private static final int HEADER_HEIGHT = 34;
 	private static final int SECTION_HEIGHT = 12 + M3.ROW_HEIGHT * 2 + M3.ROW_GAP;
 	private static final int FOOTER_HEIGHT = 32;
 
-	/** Left mouse button in the {@code InputConstants} numbering used by {@code MouseButtonEvent}. */
-	private static final int LEFT_BUTTON = 1;
-
 	private static final String OPEN_ANIM = "screen:open";
 
-	private static final String PART_HEADER = "header";
-	private static final String PART_APPEARANCE = "appearance";
-	private static final String PART_EFFECTS = "effects";
-	private static final String PART_FOOTER = "footer";
+	/** Config keys of the movable F3 parts. */
+	private static final String PART_LEFT = "f3_left";
+	private static final String PART_RIGHT = "f3_right";
+	private static final String PART_PIE = "f3_pie";
 
-	/** Button hit boxes, recomputed every frame. */
-	private final List<Button> buttons = new ArrayList<>();
-
-	private boolean editingLayout;
-
-	private String dragging;
-
-	private int dragGrabX;
-	private int dragGrabY;
-
-	/** Rows in draw order: [part, label, detail, getter, setter]. */
-	private record Toggle(String part, int index, String label, String detail,
-			java.util.function.BooleanSupplier getter, java.util.function.Consumer<Boolean> setter) {
+	private record Toggle(String label, String detail, java.util.function.BooleanSupplier getter,
+			java.util.function.Consumer<Boolean> setter) {
 	}
 
 	private static final List<Toggle> TOGGLES = List.of(
-			new Toggle(PART_APPEARANCE, 0, "中文标签", "把字段名换成中文",
+			new Toggle("中文标签", "把字段名换成中文",
 					() -> OhMyF3Config.get().chineseLabels, v -> OhMyF3Config.get().chineseLabels = v),
-			new Toggle(PART_APPEARANCE, 1, "关键词图标", "在字段前显示图标",
+			new Toggle("关键词图标", "在字段前显示图标",
 					() -> OhMyF3Config.get().icons, v -> OhMyF3Config.get().icons = v),
-			new Toggle(PART_EFFECTS, 0, "背景模糊", "卡片背后模糊世界",
+			new Toggle("背景模糊", "卡片背后模糊世界",
 					() -> OhMyF3Config.get().blur, v -> OhMyF3Config.get().blur = v),
-			new Toggle(PART_EFFECTS, 1, "滑入动画", "两列滑入滑出",
+			new Toggle("滑入动画", "两列滑入滑出",
 					() -> OhMyF3Config.get().slideAnimation, v -> OhMyF3Config.get().slideAnimation = v));
-
-	/** One draggable block on the panel. */
-	private record Part(String key, int x, int y, int width, int height) {
-	}
 
 	private record Button(String key, String label, int x, int y, int width, int height, boolean filled) {
 	}
 
+	/** A draggable stand-in for one F3 element inside the miniature. */
+	private record Handle(String key, String label, int x, int y, int width, int height) {
+	}
+
+	private final List<Button> buttons = new ArrayList<>();
+
+	private boolean layoutMode;
+
+	private String dragging;
+	private int dragStartX;
+	private int dragStartY;
+	private int dragOriginX;
+	private int dragOriginY;
+
 	public SettingsScreen() {
 		super(Component.literal("OhMyF3 设置"));
-		// Entrance motion: the panel rises into place over ~200 ms instead of popping in.
-		com.ohmyf3.client.ui.Anim.seed(OPEN_ANIM, 0.0F);
+		Anim.seed(OPEN_ANIM, 0.0F);
 	}
 
 	@Override
@@ -87,133 +84,135 @@ public final class SettingsScreen extends Screen {
 		buttons.clear();
 	}
 
-	// ---------------------------------------------------------------- layout
+	// ---------------------------------------------------------------- geometry
 
 	private int panelX() {
 		return this.width / 2 - PANEL_WIDTH / 2;
 	}
 
-	private int panelY() {
-		int panelHeight = PADDING * 2 + HEADER_HEIGHT + PART_GAP + SECTION_HEIGHT * 2 + PART_GAP * 2 + FOOTER_HEIGHT;
-		return Math.max(8, this.height / 2 - panelHeight / 2);
-	}
-
 	private int panelHeight() {
-		return PADDING * 2 + HEADER_HEIGHT + PART_GAP + SECTION_HEIGHT * 2 + PART_GAP * 2 + FOOTER_HEIGHT;
+		return PADDING * 2 + HEADER_HEIGHT + GAP + SECTION_HEIGHT * 2 + GAP + FOOTER_HEIGHT;
 	}
 
-	/** Default stack positions, each shifted by the stored offset. */
-	private List<Part> parts() {
-		OhMyF3Config config = OhMyF3Config.get();
-		int x = panelX() + PADDING;
-		int width = PANEL_WIDTH - PADDING * 2;
-		int y = panelY() + PADDING;
-
-		List<Part> parts = new ArrayList<>(4);
-		parts.add(shifted(config, new Part(PART_HEADER, x, y, width, HEADER_HEIGHT)));
-		y += HEADER_HEIGHT + PART_GAP;
-		parts.add(shifted(config, new Part(PART_APPEARANCE, x, y, width, SECTION_HEIGHT)));
-		y += SECTION_HEIGHT + PART_GAP;
-		parts.add(shifted(config, new Part(PART_EFFECTS, x, y, width, SECTION_HEIGHT)));
-		y += SECTION_HEIGHT + PART_GAP;
-		parts.add(shifted(config, new Part(PART_FOOTER, x, y, width, FOOTER_HEIGHT)));
-		return parts;
+	private int panelY() {
+		return Math.max(8, this.height / 2 - panelHeight() / 2);
 	}
 
-	private Part shifted(OhMyF3Config config, Part part) {
-		int[] offset = config.offset(part.key());
-		return new Part(part.key(), part.x() + offset[0], part.y() + offset[1], part.width(), part.height());
+	private int contentX() {
+		return panelX() + PADDING;
 	}
 
-	private Part part(List<Part> parts, String key) {
-		for (Part part : parts) {
-			if (part.key().equals(key)) {
-				return part;
-			}
-		}
-
-		return new Part(key, 0, 0, 0, 0);
+	private int contentWidth() {
+		return PANEL_WIDTH - PADDING * 2;
 	}
 
-	/** Rect of one settings row inside its part (the section label occupies the first 12px). */
-	private int[] rowRect(Part part, int index) {
-		return new int[] {part.x(), part.y() + 12 + index * (M3.ROW_HEIGHT + M3.ROW_GAP), part.width(), M3.ROW_HEIGHT};
+	private int appearanceY() {
+		return panelY() + PADDING + HEADER_HEIGHT + GAP;
+	}
+
+	private int effectsY() {
+		return appearanceY() + SECTION_HEIGHT + GAP;
+	}
+
+	private int footerY() {
+		return effectsY() + SECTION_HEIGHT + GAP;
+	}
+
+	private int[] rowRect(int sectionY, int index) {
+		return new int[] {contentX(), sectionY + 12 + index * (M3.ROW_HEIGHT + M3.ROW_GAP), contentWidth(),
+				M3.ROW_HEIGHT};
+	}
+
+	/** The miniature canvas replaces the two sections while the layout is being edited. */
+	private int canvasX() {
+		return contentX();
+	}
+
+	private int canvasY() {
+		return appearanceY();
+	}
+
+	private int canvasWidth() {
+		return contentWidth();
+	}
+
+	private int canvasHeight() {
+		return SECTION_HEIGHT * 2 + GAP;
 	}
 
 	// ---------------------------------------------------------------- drawing
 
-	private static long lastDiag;
-
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partial) {
-		int guiScale = Minecraft.getInstance().getWindow().getGuiScale();
-		TtfTextRenderer.ensureDeviceScale(guiScale);
-		float open = com.ohmyf3.client.ui.Anim.value(OPEN_ANIM, 1.0F);
+		TtfTextRenderer.ensureDeviceScale(Minecraft.getInstance().getWindow().getGuiScale());
+
+		float open = Anim.value(OPEN_ANIM, 1.0F);
 		M3.scrim(graphics, this.width, this.height, open);
 
-		// Slide up from 10px below; integer offsets keep the text crisp.
 		int lift = Math.round((1.0F - open) * 10.0F);
 		graphics.pose().pushMatrix();
 		graphics.pose().translate(0.0F, lift);
+
 		M3.panel(graphics, panelX(), panelY(), PANEL_WIDTH, panelHeight());
+		TtfTextRenderer.drawString(graphics, "OhMyF3 设置", contentX(), panelY() + PADDING + 12, M3.ON_SURFACE);
+		TtfTextRenderer.drawString(graphics, layoutMode ? "拖动色块调整 F3 各元素的位置" : "F3 调试界面的外观与行为",
+				contentX(), panelY() + PADDING + 26, M3.ON_SURFACE_VARIANT_BRIGHT);
 
-		List<Part> parts = parts();
-
-		renderHeader(graphics, part(parts, PART_HEADER));
-		renderSection(graphics, parts, PART_APPEARANCE, "外观", mouseX, mouseY);
-		renderSection(graphics, parts, PART_EFFECTS, "效果", mouseX, mouseY);
-		renderFooter(graphics, part(parts, PART_FOOTER), mouseX, mouseY);
-
-		if (editingLayout) {
-			for (Part part : parts) {
-				Shapes.dragOutline(graphics, part.x() - 3, part.y() - 3, part.width() + 6, part.height() + 6,
-						0x80D0BCFF);
-			}
-
-			M3.chip(graphics, panelX() + PANEL_WIDTH - 108, panelY() - 26, "拖动分区调整位置",
-					M3.PRIMARY_CONTAINER, M3.ON_PRIMARY_CONTAINER);
+		if (layoutMode) {
+			renderLayoutEditor(graphics, mouseX, mouseY);
+		} else {
+			renderSections(graphics, mouseX, mouseY);
 		}
 
+		renderFooter(graphics, mouseX, mouseY);
 		graphics.pose().popMatrix();
 	}
 
-	private void renderHeader(GuiGraphicsExtractor graphics, Part part) {
-		TtfTextRenderer.drawString(graphics, "OhMyF3 设置", part.x(), part.y() + 12, M3.ON_SURFACE);
-		TtfTextRenderer.drawString(graphics, "F3 调试界面的外观与行为", part.x(), part.y() + 26,
-				M3.ON_SURFACE_VARIANT);
-	}
+	private void renderSections(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		M3.section(graphics, "外观", contentX(), appearanceY() + 9);
+		M3.section(graphics, "效果", contentX(), effectsY() + 9);
 
-	private void renderSection(GuiGraphicsExtractor graphics, List<Part> parts, String key, String label,
-			int mouseX, int mouseY) {
-		Part part = part(parts, key);
-		M3.section(graphics, label, part.x(), part.y() + 9);
-
-		for (Toggle toggle : TOGGLES) {
-			if (!toggle.part().equals(key)) {
-				continue;
-			}
-
-			int[] rect = rowRect(part, toggle.index());
-			boolean hovered = M3.inside(mouseX, mouseY, rect[0], rect[1], rect[2], rect[3]) && !editingLayout;
+		for (int i = 0; i < TOGGLES.size(); i++) {
+			Toggle toggle = TOGGLES.get(i);
+			int[] rect = rowRect(i < 2 ? appearanceY() : effectsY(), i < 2 ? i : i - 2);
+			boolean hovered = M3.inside(mouseX, mouseY, rect[0], rect[1], rect[2], rect[3]);
 			M3.switchRow(graphics, rect[0], rect[1], rect[2], toggle.label(), toggle.detail(),
 					toggle.getter().getAsBoolean(), hovered);
+			M3.drawRipple(graphics, "row:" + toggle.label(), rect[0], rect[1], rect[2], rect[3]);
 		}
 	}
 
-	private void renderFooter(GuiGraphicsExtractor graphics, Part part, int mouseX, int mouseY) {
-		int x = part.x();
-		int y = part.y();
-		int height = part.height();
+	private void renderLayoutEditor(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		Shapes.outlined(graphics, canvasX(), canvasY(), canvasWidth(), canvasHeight(), M3.RADIUS_LARGE,
+				M3.SURFACE_CONTAINER, M3.OUTLINE_VARIANT);
+
+		for (Handle handle : handles()) {
+			boolean hovered = M3.inside(mouseX, mouseY, handle.x(), handle.y(), handle.width(), handle.height());
+			int fill = hovered || handle.key().equals(dragging) ? M3.PRIMARY_CONTAINER : M3.SURFACE_CONTAINER_HIGHEST;
+			Shapes.filled(graphics, handle.x(), handle.y(), handle.width(), handle.height(), M3.RADIUS_SMALL, fill);
+
+			int labelWidth = TtfTextRenderer.stringWidth(handle.label());
+			TtfTextRenderer.drawString(graphics, handle.label(),
+					handle.x() + (handle.width() - labelWidth) / 2.0F,
+					handle.y() + handle.height() / 2 + TtfTextRenderer.lineHeight() / 2 - 2,
+					hovered ? M3.ON_PRIMARY_CONTAINER : M3.ON_SURFACE_VARIANT_BRIGHT);
+		}
+	}
+
+	private void renderFooter(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		int y = footerY();
+		int height = FOOTER_HEIGHT;
+		int x = contentX();
 
 		int doneWidth = 84;
-		int layoutWidth = 96;
+		int modeWidth = 96;
 		int resetWidth = 84;
 
 		buttons.clear();
 		buttons.add(new Button("done", "完成", x, y, doneWidth, height, true));
-		buttons.add(new Button("layout", editingLayout ? "结束调整" : "调整布局", x + doneWidth + 8, y, layoutWidth,
-				height, false));
-		buttons.add(new Button("reset", "恢复默认", x + doneWidth + layoutWidth + 16, y, resetWidth, height, false));
+		buttons.add(new Button("mode", layoutMode ? "结束调整" : "调整 F3 布局", x + doneWidth + 8, y, modeWidth, height,
+				false));
+		buttons.add(new Button("reset", "恢复默认", x + doneWidth + modeWidth + 16, y, resetWidth, height, false));
 
 		for (Button button : buttons) {
 			boolean hovered = M3.inside(mouseX, mouseY, button.x(), button.y(), button.width(), button.height());
@@ -225,7 +224,45 @@ public final class SettingsScreen extends Screen {
 				M3.textButton(graphics, button.x(), button.y(), button.width(), button.height(), button.label(),
 						hovered);
 			}
+
+			M3.drawRipple(graphics, "btn:" + button.key(), button.x(), button.y(), button.width(), button.height());
 		}
+	}
+
+	/**
+	 * The three movable F3 elements, laid out inside the miniature.
+	 *
+	 * <p>Preview coordinates are the canonical positions plus the stored offset scaled down, so
+	 * dragging a block moves the real overlay by the same relative amount.
+	 */
+	private List<Handle> handles() {
+		OhMyF3Config config = OhMyF3Config.get();
+		int x = canvasX();
+		int y = canvasY();
+		int width = canvasWidth();
+		int height = canvasHeight();
+
+		float scaleX = width / (float) Math.max(1, this.width);
+		float scaleY = height / (float) Math.max(1, this.height);
+
+		int columnWidth = Math.round(width * 0.28F);
+		int columnHeight = Math.round(height * 0.66F);
+		int pieSize = Math.round(height * 0.34F);
+
+		int[] left = config.offset(PART_LEFT);
+		int[] right = config.offset(PART_RIGHT);
+		int[] pie = config.offset(PART_PIE);
+
+		List<Handle> handles = new ArrayList<>(3);
+		handles.add(new Handle(PART_LEFT, "左列",
+				x + 4 + Math.round(left[0] * scaleX), y + 4 + Math.round(left[1] * scaleY), columnWidth, columnHeight));
+		handles.add(new Handle(PART_RIGHT, "右列",
+				x + width - 4 - columnWidth + Math.round(right[0] * scaleX), y + 4 + Math.round(right[1] * scaleY),
+				columnWidth, columnHeight));
+		handles.add(new Handle(PART_PIE, "饼图",
+				x + Math.round(width * 0.55F) + Math.round(pie[0] * scaleX),
+				y + Math.round(height * 0.45F) + Math.round(pie[1] * scaleY), pieSize, pieSize));
+		return handles;
 	}
 
 	// ---------------------------------------------------------------- input
@@ -235,22 +272,28 @@ public final class SettingsScreen extends Screen {
 		double mouseX = event.x();
 		double mouseY = event.y();
 
-		// MouseButtonEvent reports InputConstants codes, where the left button is 1 (GLFW's 0 is
-		// remapped by the input layer), so comparing against 0 would treat every left click as a
-		// right click.
+		// MouseButtonEvent reports InputConstants codes, where the left button is 1.
 		if (event.button() != LEFT_BUTTON) {
 			return super.mouseClicked(event, quickMove);
 		}
 
-		List<Part> parts = parts();
+		for (Button button : buttons) {
+			if (M3.inside(mouseX, mouseY, button.x(), button.y(), button.width(), button.height())) {
+				M3.ripple("btn:" + button.key(), mouseX, mouseY);
+				onButton(button.key());
+				return true;
+			}
+		}
 
-		if (editingLayout) {
-			for (Part part : parts) {
-				if (M3.inside(mouseX, mouseY, part.x(), part.y(), part.width(), part.height())) {
-					dragging = part.key();
-					int[] offset = OhMyF3Config.get().offset(part.key());
-					dragGrabX = (int) mouseX - offset[0];
-					dragGrabY = (int) mouseY - offset[1];
+		if (layoutMode) {
+			for (Handle handle : handles()) {
+				if (M3.inside(mouseX, mouseY, handle.x(), handle.y(), handle.width(), handle.height())) {
+					dragging = handle.key();
+					dragStartX = (int) mouseX;
+					dragStartY = (int) mouseY;
+					int[] offset = OhMyF3Config.get().offset(handle.key());
+					dragOriginX = offset[0];
+					dragOriginY = offset[1];
 					return true;
 				}
 			}
@@ -258,18 +301,12 @@ public final class SettingsScreen extends Screen {
 			return true;
 		}
 
-		for (Button button : buttons) {
-			if (M3.inside(mouseX, mouseY, button.x(), button.y(), button.width(), button.height())) {
-				onButton(button.key());
-				return true;
-			}
-		}
-
-		for (Toggle toggle : TOGGLES) {
-			Part part = part(parts, toggle.part());
-			int[] rect = rowRect(part, toggle.index());
+		for (int i = 0; i < TOGGLES.size(); i++) {
+			Toggle toggle = TOGGLES.get(i);
+			int[] rect = rowRect(i < 2 ? appearanceY() : effectsY(), i < 2 ? i : i - 2);
 
 			if (M3.inside(mouseX, mouseY, rect[0], rect[1], rect[2], rect[3])) {
+				M3.ripple("row:" + toggle.label(), mouseX, mouseY);
 				toggle.setter().accept(!toggle.getter().getAsBoolean());
 				OhMyF3Config.get().save();
 				return true;
@@ -285,15 +322,17 @@ public final class SettingsScreen extends Screen {
 			return super.mouseDragged(event, dragX, dragY);
 		}
 
-		int[] offset = new int[] {(int) event.x() - dragGrabX, (int) event.y() - dragGrabY};
+		float scaleX = canvasWidth() / (float) Math.max(1, this.width);
+		float scaleY = canvasHeight() / (float) Math.max(1, this.height);
 
-		// Keep the part inside the panel so it cannot be dragged out of reach.
-		int minX = -PANEL_WIDTH / 2;
-		int minY = -panelHeight() / 2;
-		int maxX = PANEL_WIDTH / 2;
-		int maxY = panelHeight() / 2;
-		offset[0] = Math.max(minX, Math.min(maxX, offset[0]));
-		offset[1] = Math.max(minY, Math.min(maxY, offset[1]));
+		int offsetX = dragOriginX + Math.round(((float) event.x() - dragStartX) / scaleX);
+		int offsetY = dragOriginY + Math.round(((float) event.y() - dragStartY) / scaleY);
+
+		// Keep the offsets sane: a part can be nudged, not exiled off the screen.
+		int limitX = this.width / 2;
+		int limitY = this.height / 2;
+		offsetX = Math.max(-limitX, Math.min(limitX, offsetX));
+		offsetY = Math.max(-limitY, Math.min(limitY, offsetY));
 
 		OhMyF3Config config = OhMyF3Config.get();
 
@@ -301,7 +340,7 @@ public final class SettingsScreen extends Screen {
 			config.layout = new java.util.LinkedHashMap<>();
 		}
 
-		config.layout.put(dragging, offset);
+		config.layout.put(dragging, new int[] {offsetX, offsetY});
 		return true;
 	}
 
@@ -319,11 +358,8 @@ public final class SettingsScreen extends Screen {
 	private void onButton(String key) {
 		switch (key) {
 			case "done" -> close();
-			case "layout" -> editingLayout = !editingLayout;
-			case "reset" -> {
-				OhMyF3Config.get().resetLayout();
-				editingLayout = false;
-			}
+			case "mode" -> layoutMode = !layoutMode;
+			case "reset" -> OhMyF3Config.get().resetLayout();
 			default -> {
 			}
 		}
@@ -331,9 +367,8 @@ public final class SettingsScreen extends Screen {
 
 	@Override
 	public boolean keyPressed(KeyEvent event) {
-		// Escape leaves layout editing first, so a stray drag mode never traps the player.
-		if (event.input() == 256 && editingLayout) {
-			editingLayout = false;
+		if (event.input() == 256 && layoutMode) {
+			layoutMode = false;
 			return true;
 		}
 

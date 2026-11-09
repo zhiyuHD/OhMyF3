@@ -106,9 +106,11 @@ public final class M3 {
 		int trackOutline = Anim.mix(OUTLINE, PRIMARY, clamped);
 		Shapes.outlined(graphics, x, Math.round(y), trackWidth, trackHeight, trackHeight / 2, track, trackOutline);
 
+		// 3px inset keeps the thumb off the track edge in both states (it used to sit flush).
 		float thumbRadius = 7.0F;
-		float travel = trackWidth - 2 - thumbRadius * 2;
-		float thumbCenterX = x + 1 + thumbRadius + travel * clamped;
+		float inset = 3.0F;
+		float travel = trackWidth - inset * 2 - thumbRadius * 2;
+		float thumbCenterX = x + inset + thumbRadius + travel * clamped;
 		Shapes.circle(graphics, thumbCenterX, y + trackHeight / 2.0F, thumbRadius,
 				Anim.mix(OUTLINE, ON_PRIMARY, clamped));
 	}
@@ -144,6 +146,41 @@ public final class M3 {
 		int width = TtfTextRenderer.stringWidth(label) + 20;
 		Shapes.filled(graphics, x, y, width, 20, 10, background);
 		TtfTextRenderer.drawString(graphics, label, x + 10, y + 14, foreground);
+	}
+
+	// ---------------------------------------------------------------- ripple
+
+	private record Ripple(float x, float y, long startNanos) {
+	}
+
+	private static final java.util.Map<String, Ripple> RIPPLES = new java.util.HashMap<>();
+
+	/** Starts a Material ripple at the pointer, clipped to the component it belongs to. */
+	public static void ripple(String key, double x, double y) {
+		RIPPLES.put(key, new Ripple((float) x, (float) y, System.nanoTime()));
+	}
+
+	/** Draws (and expires) the ripple for {@code key}; call right after painting the component. */
+	public static void drawRipple(GuiGraphicsExtractor graphics, String key, int x, int y, int width, int height) {
+		Ripple ripple = RIPPLES.get(key);
+
+		if (ripple == null) {
+			return;
+		}
+
+		float progress = (System.nanoTime() - ripple.startNanos()) / 320_000_000.0F;
+
+		if (progress >= 1.0F) {
+			RIPPLES.remove(key);
+			return;
+		}
+
+		float radius = 4.0F + progress * Math.max(width, height) * 0.75F;
+		float fade = (1.0F - progress) * (1.0F - progress);
+
+		graphics.enableScissor(x, y, x + width, y + height);
+		Shapes.circle(graphics, ripple.x(), ripple.y(), radius, Anim.alpha(0x66FFFFFF, fade));
+		graphics.disableScissor();
 	}
 
 	public static boolean inside(double mouseX, double mouseY, int x, int y, int width, int height) {

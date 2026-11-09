@@ -60,6 +60,13 @@ public final class PieChartRenderer {
 			return false;
 		}
 
+		// User layout offset for the pie (see the layout editor in settings).
+		int[] pieOffset = com.ohmyf3.config.OhMyF3Config.get().offset("f3_pie");
+		x1 += pieOffset[0];
+		x2 += pieOffset[0];
+		y1 += pieOffset[1];
+		y2 += pieOffset[1];
+
 		float radius = Math.min(x2 - x1, y2 - y1) / 2.0F;
 
 		if (radius < 6.0F) {

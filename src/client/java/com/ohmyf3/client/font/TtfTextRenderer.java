@@ -317,8 +317,10 @@ public final class TtfTextRenderer {
 			lastRightCardWidth = cardWidth;
 		}
 
-		int x = (alignLeft ? 2 : screenWidth - 2 - cardWidth) + Math.round(xOffset);
-		int y = 2;
+		// User layout offsets for the two F3 columns (see the layout editor in settings).
+		int[] columnOffset = OhMyF3Config.get().offset(alignLeft ? "f3_left" : "f3_right");
+		int x = (alignLeft ? 2 : screenWidth - 2 - cardWidth) + Math.round(xOffset) + columnOffset[0];
+		int y = 2 + columnOffset[1];
 
 		for (Card card : cards) {
 			int height = CARD_PADDING * 2 + card.rows().size() * lineHeight;
