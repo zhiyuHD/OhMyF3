@@ -36,7 +36,7 @@ class KeywordIconsTest {
 
 	@Test
 	void matchesEachDocumentedKeyword() {
-		assertEquals(IconPainter.Icon.BOLT, KeywordIcons.iconStartingAt("Sodium Renderer", 0));
+		assertEquals(IconPainter.Icon.SODIUM, KeywordIcons.iconStartingAt("Sodium Renderer", 0));
 		assertEquals(IconPainter.Icon.CHIP, KeywordIcons.iconStartingAt("OpenGL 4.6", 0));
 		assertEquals(IconPainter.Icon.GRID, KeywordIcons.iconStartingAt("Chunk: 1 2 3", 0));
 		String allocated = "Allocated: 52% 1234MiB";

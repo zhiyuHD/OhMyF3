@@ -14,7 +14,7 @@ public final class KeywordIcons {
 	}
 
 	private static final Rule[] RULES = {
-			new Rule("Sodium", IconPainter.Icon.BOLT),
+			new Rule("Sodium", IconPainter.Icon.SODIUM),
 			new Rule("OpenGL", IconPainter.Icon.CHIP),
 			new Rule("Chunk", IconPainter.Icon.GRID),
 			new Rule("MiB", IconPainter.Icon.MEMORY),

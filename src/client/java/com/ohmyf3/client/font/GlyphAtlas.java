@@ -74,7 +74,10 @@ final class GlyphAtlas {
 					continue;
 				}
 
-				int argb = alpha << 24 | red << 16 | green << 8 | blue;
+				// The colour's own alpha scales the coverage so translucent plates
+				// (card backgrounds) can be baked here too.
+				int scaledAlpha = alpha * ((colour >>> 24) & 0xFF) / 255;
+				int argb = scaledAlpha << 24 | red << 16 | green << 8 | blue;
 				this.image.setPixel(originX + x, originY + y, argb);
 			}
 		}

@@ -98,31 +98,43 @@ Two bugs worth remembering, both caught by checking output rather than trusting 
   atlas area then leaked garbage pixels into the texture and showed up as stray white
   blocks. The atlas is created with `true` (calloc).
 
+## Debug screen layout
+
+Vanilla hands us two flat columns of strings. They are redrawn as grouped cards:
+
+- blank lines are group separators, and each group becomes a **rounded card**
+  (nine-slice texture generated in code: fill `0xC8141418`, 1px border, 3px radius);
+- every row has a fixed **icon gutter** on the left, so text always starts at the same x no
+  matter which rows happen to have an icon;
+- cards in a column share one width, so the right column lines up edge to edge;
+- icons are tinted per kind (gauge green, memory amber, chip violet, ...) to read at a glance.
+
 ## Keyword icons
 
-Words on the debug screen get an icon in front of them. The icons are **copied one-to-one
-from the Lucide icon set** (`lucide-static` 1.70.0, ISC): the original 24x24 SVG path data
-with its 2px stroke, round caps and round joins.
+A recognised word gets an icon in its gutter. Apart from Sodium's logo (below), the icons are
+**copied one-to-one from Lucide** (`lucide-static` 1.70.0, ISC): original 24x24 path data,
+2px strokes, round caps and joins.
 
-| Keyword | Icon | Lucide source |
+| Keyword | Icon | Source |
 | --- | --- | --- |
-| `fps` | speedometer | `gauge` |
-| `MiB` | RAM stick | `memory-stick` |
-| `Chunk` | four tiles | `layout-grid` |
-| `XYZ` | reticle | `crosshair` |
-| `Sodium` | lightning bolt | `zap` |
-| `OpenGL` | processor | `cpu` |
-| `Java` | coffee cup | `coffee` |
-| `Seed` | dice | `dices` |
+| `fps` | speedometer | Lucide `gauge` |
+| `MiB` | RAM stick | Lucide `memory-stick` |
+| `Chunk` | four tiles | Lucide `layout-grid` |
+| `XYZ` | reticle | Lucide `crosshair` |
+| `Sodium` | Sodium's own logo | `sodium-icon.png` |
+| `OpenGL` | processor | Lucide `cpu` |
+| `Java` | coffee cup | Lucide `coffee` |
+| `Seed` | dice | Lucide `dices` |
 
-`SvgPath` parses the path data (`M L H V C S Q T A Z`, absolute and relative, implicit
-linetos and repeated coordinate sets) and flattens curves and elliptical arcs to polylines.
-`IconPainter` strokes those polylines by distance field, 8x8 samples per pixel, which gives
-the same antialiasing the text gets. Because the stroke has round caps, Lucide's zero-length
-segments (`M6 18h.01`) render as dots for free.
+`SvgPath` parses the Lucide path data (`M L H V C S Q T A Z`, absolute and relative, implicit
+linetos, repeated coordinate sets) and flattens curves and elliptical arcs to polylines;
+`IconPainter` strokes them by distance field, 8x8 samples per pixel. Because the stroke has
+round caps, Lucide's zero-length segments (`M6 18h.01`) become dots for free.
 
-Icons are laid out as ordinary cells in the line, so they take part in width measurement and
-right-column alignment; only the first occurrence of a keyword per line gets an icon.
+**Sodium's logo is not a vector in Sodium's code.** Its video settings screen blits
+`sodium-icon.png` through a tinted blit, so there is no path data to copy. The mark is
+therefore embedded as a 48x48 coverage mask traced from that icon (`SodiumLogo`), sampled
+bilinearly when painted, which keeps the shape accurate without shipping another mod's asset.
 
 ## Text rendering quality
 

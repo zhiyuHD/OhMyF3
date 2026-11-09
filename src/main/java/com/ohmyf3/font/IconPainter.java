@@ -38,6 +38,8 @@ public final class IconPainter {
 		CROSSHAIR,
 		/** {@code zap}: lightning bolt. */
 		BOLT,
+		/** Sodium's own logo: a droplet with an M-shaped notch. */
+		SODIUM,
 		/** {@code cpu}: processor. */
 		CHIP,
 		/** {@code coffee}: cup with steam. */
@@ -52,6 +54,10 @@ public final class IconPainter {
 	 * @param pixelSize edge length in pixels at the current device scale
 	 */
 	public static CoverageBitmap paint(Icon icon, int pixelSize) {
+		if (icon == Icon.SODIUM) {
+			return paintSodiumLogo(pixelSize);
+		}
+
 		List<float[]> geometry = geometry(icon);
 
 		float scale = pixelSize / VIEWBOX;
@@ -76,6 +82,30 @@ public final class IconPainter {
 				}
 
 				coverage[py * pixelSize + px] = (byte) Math.round(255.0F * inside / samples);
+			}
+		}
+
+		return new CoverageBitmap(pixelSize, pixelSize, 0, 0, coverage);
+	}
+
+	/** Samples Sodium's embedded coverage mask into an icon bitmap. */
+	private static CoverageBitmap paintSodiumLogo(int pixelSize) {
+		byte[] coverage = new byte[pixelSize * pixelSize];
+		int samples = SUBSAMPLES * SUBSAMPLES;
+
+		for (int py = 0; py < pixelSize; py++) {
+			for (int px = 0; px < pixelSize; px++) {
+				int total = 0;
+
+				for (int sy = 0; sy < SUBSAMPLES; sy++) {
+					for (int sx = 0; sx < SUBSAMPLES; sx++) {
+						float u = (px + (sx + 0.5F) / SUBSAMPLES) / pixelSize;
+						float v = (py + (sy + 0.5F) / SUBSAMPLES) / pixelSize;
+						total += SodiumLogo.coverage(u, v);
+					}
+				}
+
+				coverage[py * pixelSize + px] = (byte) Math.round((float) total / samples);
 			}
 		}
 

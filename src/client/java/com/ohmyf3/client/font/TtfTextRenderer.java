@@ -6,11 +6,9 @@ import com.mojang.renderpearl.api.textures.GpuTextureView;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import com.ohmyf3.font.CoverageBitmap;
 import com.ohmyf3.font.GlyphOutline;
@@ -29,20 +27,16 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Draws debug-screen text with a system TrueType font instead of Minecraft's bitmap font.
+ * Draws the debug screen with a system TrueType font, grouped cards and keyword icons.
  *
- * <p>Glyphs are rasterised on demand, packed into one atlas, uploaded once per batch of new
- * glyphs, and drawn as textured quads through {@link GuiGraphicsExtractor}. Everything is
- * best-effort: if no usable font can be found the renderer reports itself unavailable and
- * the caller falls back to vanilla text.
+ * <p>Vanilla hands us two flat columns of strings. Instead of drawing them as a wall of text,
+ * blank lines are used as group separators and every group becomes a rounded card with a
+ * leading icon column. Rows share one gutter, so the text lines up no matter which rows
+ * happen to have an icon.
  *
- * <p>Glyphs are rasterised at the current device-pixel ratio (GUI scale times the pose
- * scale the debug overlay applies) and the quads are drawn at 1/N of that size in GUI
- * units, so the atlas texels land on screen pixels one-to-one.
- *
- * <p>Lines are also scanned for keywords; a matching word gets a procedurally drawn icon
- * inserted in front of it. Icons are part of the line layout, so they take part in width
- * measurement and right-column alignment like any other glyph.
+ * <p>Glyphs are rasterised at the current device-pixel ratio and padded to the device grid,
+ * so one atlas texel lands on exactly one screen pixel; positions that do not fall on a whole
+ * GUI pixel are nudged with a fractional pose translation.
  */
 public final class TtfTextRenderer {
 	private static final Logger LOGGER = LoggerFactory.getLogger("ohmyf3/font");
@@ -50,16 +44,23 @@ public final class TtfTextRenderer {
 	/** Font pixel size in GUI units. */
 	private static final int PIXEL_SIZE = 9;
 
-	/** Icon edge length and the gap after it, in GUI units. */
 	private static final int ICON_SIZE = 10;
-	private static final int ICON_GAP = 2;
+	private static final int ICON_GAP = 3;
 
-	/** Colour of debug text that carries no formatting code. */
+	/** Card geometry, in GUI units. */
+	private static final int CARD_PADDING = 3;
+	private static final int CARD_GAP = 4;
+	private static final int CARD_CORNER = 4;
+	private static final int CARD_RADIUS = 3;
+	/** Width reserved for the icon column. */
+	private static final int GUTTER = ICON_SIZE + ICON_GAP;
+
+	private static final int CARD_FILL = 0xC8141418;
+	private static final int CARD_BORDER = 0x2AFFFFFF;
+
 	private static final int DEFAULT_COLOR = 0xFFE0E0E0;
+	private static final int FORMATTING_CODE = '\u00a7';
 
-	private static final int BACKGROUND_COLOR = 0x90505050;
-
-	/** Vanilla legacy palette, indexed by the hex digit after the section sign. */
 	private static final int[] LEGACY_COLORS = {
 			0xFF000000, 0xFF0000AA, 0xFF00AA00, 0xFF00AAAA,
 			0xFFAA0000, 0xFFAA00AA, 0xFFFFAA00, 0xFFAAAAAA,
@@ -67,11 +68,7 @@ public final class TtfTextRenderer {
 			0xFFFF5555, 0xFFFF55FF, 0xFFFFFF55, 0xFFFFFFFF
 	};
 
-	private static final char FORMATTING_CODE = '\u00a7';
-
 	private static final Identifier ATLAS_ID = Identifier.fromNamespaceAndPath("ohmyf3", "font_atlas");
-
-	/** Half-texel inset so linear filtering never samples a neighbouring glyph. */
 	private static final float TEXEL_INSET = 0.5F;
 
 	private static boolean attempted;
@@ -87,27 +84,28 @@ public final class TtfTextRenderer {
 	private static int ascent;
 	private static int lineHeight;
 
-	/** Current device pixels per GUI pixel; the atlas is rebuilt when it changes. */
 	private static int deviceScale = -1;
 
 	private static final Map<GlyphKey, Sprite> GLYPHS = new HashMap<>();
 	private static final Map<IconKey, Sprite> ICONS = new HashMap<>();
 
+	private static GlyphAtlas.Rect cardFill;
+	private static GlyphAtlas.Rect cardBorder;
+
 	private TtfTextRenderer() {
 	}
 
-	/**
-	 * A drawable item already converted to GUI units. {@code rect} is {@code null} for blank
-	 * glyphs such as space.
-	 */
 	private record Sprite(GlyphAtlas.Rect rect, int left, int top, int width, int height, float advance) {
 	}
 
-	/** One slot of a laid-out line: a glyph or an icon, with its advance. */
-	private record Cell(Sprite sprite, boolean icon, float advance) {
+	private record Cell(Sprite sprite, float advance) {
 	}
 
-	/** A glyph instance is colour-specific because the colour is baked into the atlas. */
+	/** One debug line: an optional leading icon plus its glyphs. */
+	private record Row(IconPainter.Icon icon, List<Cell> cells) {
+		static final Row EMPTY = new Row(null, List.of());
+	}
+
 	private record GlyphKey(int codePoint, int color) {
 	}
 
@@ -123,10 +121,6 @@ public final class TtfTextRenderer {
 		return lineHeight;
 	}
 
-	/**
-	 * Draws the two debug columns, mirroring vanilla's layout (2px margins, one background
-	 * plate per line, left column left-aligned and right column right-aligned).
-	 */
 	public static void drawLines(GuiGraphicsExtractor graphics, List<String> lines, boolean alignLeft,
 			int screenWidth) {
 		ensureInitialised();
@@ -135,7 +129,6 @@ public final class TtfTextRenderer {
 			return;
 		}
 
-		// Follow the effective device-pixel ratio so glyphs stay pixel-aligned.
 		float poseScale = graphics.pose().m00();
 		int target = Math.max(1, Math.round(Minecraft.getInstance().getWindow().getGuiScale() * poseScale));
 
@@ -145,16 +138,12 @@ public final class TtfTextRenderer {
 					Minecraft.getInstance().getWindow().getGuiScale(), poseScale);
 		}
 
-		// Build the layout first: this rasterises any glyph or icon that is not cached yet,
-		// so one upload covers the whole frame before a single quad is emitted.
-		List<List<Cell>> layouts = new ArrayList<>(lines.size());
+		// Layout first: this rasterises anything not yet cached, so one upload covers the
+		// whole frame before a single quad is emitted.
+		List<Row> rows = new ArrayList<>(lines.size());
 
 		for (String line : lines) {
-			if (line == null || line.isEmpty()) {
-				layouts.add(List.of());
-			} else {
-				layouts.add(layout(line));
-			}
+			rows.add(line == null || line.isEmpty() ? Row.EMPTY : layout(line));
 		}
 
 		if (atlas.isDirty()) {
@@ -162,70 +151,170 @@ public final class TtfTextRenderer {
 			atlas.clearDirty();
 		}
 
-		// Background plates.
-		for (int index = 0; index < layouts.size(); index++) {
-			List<Cell> cells = layouts.get(index);
+		drawColumn(graphics, rows, alignLeft, screenWidth);
+	}
 
-			if (cells.isEmpty()) {
-				continue;
-			}
+	// ---------------------------------------------------------------- cards
 
-			int width = widthOf(cells);
-			int left = alignLeft ? 2 : screenWidth - 2 - width;
-			int top = 2 + lineHeight * index;
-			graphics.fill(left - 1, top - 1, left + width + 1, top + lineHeight - 1, BACKGROUND_COLOR);
+	private static void drawColumn(GuiGraphicsExtractor graphics, List<Row> rows, boolean alignLeft,
+			int screenWidth) {
+		int widest = 0;
+
+		for (Row row : rows) {
+			widest = Math.max(widest, widthOf(row.cells()));
 		}
 
-		// Glyph and icon quads.
-		for (int index = 0; index < layouts.size(); index++) {
-			List<Cell> cells = layouts.get(index);
+		if (widest == 0) {
+			return;
+		}
 
-			if (cells.isEmpty()) {
+		int cardWidth = CARD_PADDING * 2 + GUTTER + widest;
+		int x = alignLeft ? 2 : screenWidth - 2 - cardWidth;
+		int y = 2;
+
+		for (int index = 0; index < rows.size(); ) {
+			if (!hasContent(rows.get(index))) {
+				index++;
 				continue;
 			}
 
-			int left = alignLeft ? 2 : screenWidth - 2 - widthOf(cells);
-			int top = 2 + lineHeight * index;
-			int baseline = top + ascent;
-			int iconTop = top + (lineHeight - ICON_SIZE) / 2;
+			int start = index;
 
-			// Keep the pen fractional: rounding every advance to whole pixels is what made
-			// the letters bunch up at 9px.
-			float penX = left;
+			while (index < rows.size() && hasContent(rows.get(index))) {
+				index++;
+			}
 
-			for (Cell cell : cells) {
-				Sprite sprite = cell.sprite();
+			int count = index - start;
+			int cardHeight = CARD_PADDING * 2 + count * lineHeight;
 
-				if (sprite.rect() != null) {
-					// Subpixel placement: the blit API only takes whole GUI pixels, which are
-					// several screen pixels wide, so snapping the pen to them makes some
-					// letter pairs collide and others drift apart. A fractional pose
-					// translation moves the quad by the remainder, and the render state
-					// captures the pose per quad, so the position survives.
-					float targetX = cell.icon() ? penX + ICON_GAP : penX + sprite.left();
-					int x0 = Math.round(targetX);
-					float remainder = targetX - x0;
-					int y0 = cell.icon() ? iconTop : baseline + sprite.top();
+			drawCard(graphics, x, y, cardWidth, cardHeight);
 
-					boolean shifted = Math.abs(remainder) > 0.001F;
+			for (int row = 0; row < count; row++) {
+				drawRow(graphics, rows.get(start + row), x, y + CARD_PADDING + row * lineHeight);
+			}
 
-					if (shifted) {
-						graphics.pose().pushMatrix();
-						graphics.pose().translate(remainder, 0.0F);
-					}
+			y += cardHeight + CARD_GAP;
+		}
+	}
 
-					graphics.blit(textureView, sampler, x0, y0, x0 + sprite.width(), y0 + sprite.height(),
-							sprite.rect().u0(TEXEL_INSET), sprite.rect().u1(TEXEL_INSET),
-							sprite.rect().v0(TEXEL_INSET), sprite.rect().v1(TEXEL_INSET));
+	private static boolean hasContent(Row row) {
+		return row.icon() != null || !row.cells().isEmpty();
+	}
 
-					if (shifted) {
-						graphics.pose().popMatrix();
-					}
+	private static void drawCard(GuiGraphicsExtractor graphics, int x, int y, int width, int height) {
+		if (cardFill == null) {
+			return;
+		}
+
+		blitNineSlice(graphics, cardFill, x, y, width, height);
+
+		if (cardBorder != null) {
+			blitNineSlice(graphics, cardBorder, x, y, width, height);
+		}
+	}
+
+	/** Draws a rounded-corner texture as nine stretched regions. */
+	private static void blitNineSlice(GuiGraphicsExtractor graphics, GlyphAtlas.Rect texture, int x, int y,
+			int width, int height) {
+		int corner = CARD_CORNER;
+
+		if (width <= corner * 2 || height <= corner * 2) {
+			blitRegion(graphics, texture, 0, 0, texture.width(), texture.height(), x, y, x + width, y + height);
+			return;
+		}
+
+		int source = corner * deviceScale;
+		int right = texture.width() - source;
+		int bottom = texture.height() - source;
+
+		// Corners.
+		blitRegion(graphics, texture, 0, 0, source, source, x, y, x + corner, y + corner);
+		blitRegion(graphics, texture, right, 0, texture.width(), source, x + width - corner, y, x + width,
+				y + corner);
+		blitRegion(graphics, texture, 0, bottom, source, texture.height(), x, y + height - corner,
+				x + corner, y + height);
+		blitRegion(graphics, texture, right, bottom, texture.width(), texture.height(),
+				x + width - corner, y + height - corner, x + width, y + height);
+
+		// Edges.
+		blitRegion(graphics, texture, source, 0, right, source, x + corner, y, x + width - corner, y + corner);
+		blitRegion(graphics, texture, source, bottom, right, texture.height(), x + corner,
+				y + height - corner, x + width - corner, y + height);
+		blitRegion(graphics, texture, 0, source, source, bottom, x, y + corner, x + corner,
+				y + height - corner);
+		blitRegion(graphics, texture, right, source, texture.width(), bottom, x + width - corner,
+				y + corner, x + width, y + height - corner);
+
+		// Centre.
+		blitRegion(graphics, texture, source, source, right, bottom, x + corner, y + corner,
+				x + width - corner, y + height - corner);
+	}
+
+	private static void blitRegion(GuiGraphicsExtractor graphics, GlyphAtlas.Rect texture, int sx0, int sy0,
+			int sx1, int sy1, int dx0, int dy0, int dx1, int dy1) {
+		float u0 = (texture.x() + sx0 + TEXEL_INSET) / GlyphAtlas.SIZE;
+		float u1 = (texture.x() + sx1 - TEXEL_INSET) / GlyphAtlas.SIZE;
+		float v0 = (texture.y() + sy0 + TEXEL_INSET) / GlyphAtlas.SIZE;
+		float v1 = (texture.y() + sy1 - TEXEL_INSET) / GlyphAtlas.SIZE;
+
+		graphics.blit(textureView, sampler, dx0, dy0, dx1, dy1, u0, u1, v0, v1);
+	}
+
+	private static void drawRow(GuiGraphicsExtractor graphics, Row row, int cardX, int rowY) {
+		if (row.icon() != null) {
+			Sprite icon = icon(row.icon(), iconColor(row.icon()));
+
+			if (icon.rect() != null) {
+				int iconY = rowY + (lineHeight - ICON_SIZE) / 2;
+				blitRegion(graphics, icon.rect(), 0, 0, icon.rect().width(), icon.rect().height(),
+						cardX + CARD_PADDING, iconY, cardX + CARD_PADDING + ICON_SIZE, iconY + ICON_SIZE);
+			}
+		}
+
+		int baseline = rowY + ascent;
+		float penX = cardX + CARD_PADDING + GUTTER;
+
+		for (Cell cell : row.cells()) {
+			Sprite sprite = cell.sprite();
+
+			if (sprite.rect() != null) {
+				float targetX = penX + sprite.left();
+				int x0 = Math.round(targetX);
+				float remainder = targetX - x0;
+				int y0 = baseline + sprite.top();
+
+				boolean shifted = Math.abs(remainder) > 0.001F;
+
+				if (shifted) {
+					graphics.pose().pushMatrix();
+					graphics.pose().translate(remainder, 0.0F);
 				}
 
-				penX += cell.advance();
+				blitRegion(graphics, sprite.rect(), 0, 0, sprite.rect().width(), sprite.rect().height(),
+						x0, y0, x0 + sprite.width(), y0 + sprite.height());
+
+				if (shifted) {
+					graphics.pose().popMatrix();
+				}
 			}
+
+			penX += cell.advance();
 		}
+	}
+
+	/** Icons get their own accent colour so they read as a group at a glance. */
+	private static int iconColor(IconPainter.Icon icon) {
+		return switch (icon) {
+			case GAUGE -> 0xFF8FD9A8;
+			case MEMORY -> 0xFFE0BE72;
+			case GRID -> 0xFF8FB8E8;
+			case CROSSHAIR -> 0xFFE89A9A;
+			case SODIUM -> 0xFF86D98F;
+			case BOLT -> 0xFFE8C86A;
+			case CHIP -> 0xFFB9A6E8;
+			case CUP -> 0xFFD8A87A;
+			case DICE -> 0xFFE6CC7A;
+		};
 	}
 
 	private static int widthOf(List<Cell> cells) {
@@ -240,13 +329,9 @@ public final class TtfTextRenderer {
 
 	// ---------------------------------------------------------------- layout
 
-	/**
-	 * Splits a line into glyph cells, inserting an icon in front of the first occurrence of
-	 * each recognised keyword. Formatting codes are consumed and only affect the colour.
-	 */
-	private static List<Cell> layout(String line) {
-		List<Cell> cells = new ArrayList<>(line.length() + 4);
-		Set<IconPainter.Icon> inserted = EnumSet.noneOf(IconPainter.Icon.class);
+	private static Row layout(String line) {
+		List<Cell> cells = new ArrayList<>(line.length());
+		IconPainter.Icon rowIcon = null;
 		int color = DEFAULT_COLOR;
 
 		for (int i = 0; i < line.length(); ) {
@@ -258,21 +343,17 @@ public final class TtfTextRenderer {
 				continue;
 			}
 
-			IconPainter.Icon icon = KeywordIcons.iconStartingAt(line, i);
-
-			if (icon != null && inserted.add(icon)) {
-				// Equal padding on both sides so the icon does not touch the digits it
-				// usually follows ("3806 MiB" -> "3806 [icon] MiB").
-				cells.add(new Cell(icon(icon, color), true, ICON_GAP + ICON_SIZE + ICON_GAP));
+			if (rowIcon == null) {
+				rowIcon = KeywordIcons.iconStartingAt(line, i);
 			}
 
 			int codePoint = line.codePointAt(i);
 			i += Character.charCount(codePoint);
 			Sprite sprite = glyph(codePoint, color);
-			cells.add(new Cell(sprite, false, sprite.advance()));
+			cells.add(new Cell(sprite, sprite.advance()));
 		}
 
-		return cells;
+		return new Row(rowIcon, cells);
 	}
 
 	private static int colorFor(char code, int current) {
@@ -295,18 +376,13 @@ public final class TtfTextRenderer {
 		}
 
 		int glyphIndex = font.glyphIndex(codePoint);
-		// Fractional advance in GUI units; rounding it here loses the font's side bearings.
 		float advance = Math.max(1.0F, font.advanceWidth(glyphIndex) * (PIXEL_SIZE / (float) font.unitsPerEm()));
 		GlyphOutline outline = font.outline(glyphIndex);
 		CoverageBitmap bitmap = outline == null ? null : GlyphRasterizer.rasterize(outline, fontScale);
 
-		Sprite sprite;
-
-		if (bitmap == null) {
-			sprite = new Sprite(null, 0, 0, 0, 0, advance);
-		} else {
-			sprite = place(bitmap, color, advance, true);
-		}
+		Sprite sprite = bitmap == null
+				? new Sprite(null, 0, 0, 0, 0, advance)
+				: place(alignToDeviceGrid(bitmap), color, advance);
 
 		GLYPHS.put(key, sprite);
 		return sprite;
@@ -321,38 +397,25 @@ public final class TtfTextRenderer {
 		}
 
 		CoverageBitmap bitmap = IconPainter.paint(icon, ICON_SIZE * deviceScale);
-		Sprite sprite = place(bitmap, color, ICON_SIZE + ICON_GAP, false);
+		Sprite sprite = place(bitmap, color, ICON_SIZE);
 		ICONS.put(key, sprite);
 		return sprite;
 	}
 
-	/** Uploads a bitmap into the atlas and converts its pixel offsets to GUI units. */
-	private static Sprite place(CoverageBitmap bitmap, int color, float advance, boolean useBitmapOffsets) {
-		// Quads can only be placed and sized on whole GUI pixels, and one GUI pixel is
-		// several screen pixels. Rounding the bitmap's size down to GUI units and letting
-		// the GUI scale blow it back up resamples every glyph. Padding the bitmap out to the
-		// device grid instead keeps one texel on exactly one screen pixel.
-		CoverageBitmap aligned = useBitmapOffsets ? alignToDeviceGrid(bitmap) : bitmap;
-		GlyphAtlas.Rect rect = atlas.add(aligned, color);
+	private static Sprite place(CoverageBitmap bitmap, int color, float advance) {
+		GlyphAtlas.Rect rect = atlas.add(bitmap, color);
 
 		if (rect == null) {
-			// Atlas full: draw nothing rather than crashing, but keep the advance so the rest
-			// of the line still lines up.
 			return new Sprite(null, 0, 0, 0, 0, advance);
 		}
 
-		int left = aligned.left / deviceScale;
-		int top = aligned.top / deviceScale;
-		int width = Math.max(1, aligned.width / deviceScale);
-		int height = Math.max(1, aligned.height / deviceScale);
-
-		return new Sprite(rect, left, top, width, height, advance);
+		return new Sprite(rect, bitmap.left / deviceScale, bitmap.top / deviceScale,
+				Math.max(1, bitmap.width / deviceScale), Math.max(1, bitmap.height / deviceScale), advance);
 	}
 
 	/**
-	 * Shifts a bitmap inside a larger box so its origin and its size are exact multiples of
-	 * the device scale. Rounding is then confined to transparent padding rather than to the
-	 * glyph itself.
+	 * Pads a bitmap so its origin and size are multiples of the device scale. Rounding then
+	 * only touches transparent padding, never the glyph itself.
 	 */
 	private static CoverageBitmap alignToDeviceGrid(CoverageBitmap bitmap) {
 		int scale = deviceScale;
@@ -370,14 +433,13 @@ public final class TtfTextRenderer {
 		return new CoverageBitmap(width, height, bitmap.left - shiftX, bitmap.top - shiftY, coverage);
 	}
 
-	/** Re-creates the atlas for a new device-pixel ratio; cached sprites are invalidated. */
+	// ---------------------------------------------------------------- atlas
+
 	private static void rebuildAtlas(int newDeviceScale) {
 		deviceScale = newDeviceScale;
-		// fontScale is "device pixels per font unit".
 		fontScale = PIXEL_SIZE * deviceScale / (float) font.unitsPerEm();
 
-		// `true` zeroes the native buffer: an uninitialised atlas leaks garbage into the
-		// texture and shows up as stray white blocks between glyphs.
+		// `true` zeroes the buffer: uninitialised memory leaks garbage into the texture.
 		NativeImage image = new NativeImage(NativeImage.Format.RGBA, GlyphAtlas.SIZE, GlyphAtlas.SIZE, true);
 		atlas = new GlyphAtlas(image);
 		GLYPHS.clear();
@@ -392,8 +454,74 @@ public final class TtfTextRenderer {
 			texture.setPixels(image);
 		}
 
+		buildCardTextures();
 		texture.upload();
 		atlas.clearDirty();
+	}
+
+	private static void buildCardTextures() {
+		int size = (CARD_CORNER * 2 + 2) * deviceScale;
+		float radius = CARD_RADIUS * deviceScale;
+
+		cardFill = atlas.add(roundedRect(size, radius, 0), CARD_FILL);
+		cardBorder = atlas.add(roundedRect(size, radius, Math.max(1, deviceScale / 2.0F)), CARD_BORDER);
+	}
+
+	/**
+	 * Antialiased rounded rectangle coverage.
+	 *
+	 * @param ring thickness of an outline to keep, or {@code 0} for a solid shape
+	 */
+	private static CoverageBitmap roundedRect(int size, float radius, float ring) {
+		byte[] coverage = new byte[size * size];
+		float half = size / 2.0F;
+		float innerHalf = half - ring;
+		int samples = 4;
+		int total = samples * samples;
+
+		for (int py = 0; py < size; py++) {
+			for (int px = 0; px < size; px++) {
+				int inside = 0;
+
+				for (int sy = 0; sy < samples; sy++) {
+					for (int sx = 0; sx < samples; sx++) {
+						float x = px + (sx + 0.5F) / samples;
+						float y = py + (sy + 0.5F) / samples;
+						float outer = roundedDistance(x, y, half, half, half, half, radius);
+
+						if (outer > 0) {
+							continue;
+						}
+
+						if (ring > 0) {
+							float inner = roundedDistance(x, y, half, half, innerHalf, innerHalf,
+									Math.max(0, radius - ring));
+
+							if (inner <= 0) {
+								continue;
+							}
+						}
+
+						inside++;
+					}
+				}
+
+				coverage[py * size + px] = (byte) Math.round(255.0F * inside / total);
+			}
+		}
+
+		return new CoverageBitmap(size, size, 0, 0, coverage);
+	}
+
+	/** Signed distance to a rounded rectangle centred at (cx, cy). */
+	private static float roundedDistance(float x, float y, float cx, float cy, float halfWidth, float halfHeight,
+			float radius) {
+		float dx = Math.abs(x - cx) - (halfWidth - radius);
+		float dy = Math.abs(y - cy) - (halfHeight - radius);
+		float outsideX = Math.max(dx, 0);
+		float outsideY = Math.max(dy, 0);
+		return (float) Math.sqrt(outsideX * outsideX + outsideY * outsideY) + Math.min(Math.max(dx, dy), 0)
+				- radius;
 	}
 
 	// ---------------------------------------------------------------- initialisation
@@ -424,7 +552,6 @@ public final class TtfTextRenderer {
 			LOGGER.info("Using system font {} ({} glyphs, {}px, line height {})",
 					path.getFileName(), font.glyphCount(), PIXEL_SIZE, lineHeight);
 		} catch (Throwable throwable) {
-			// Never let a font problem take the game down: fall back to vanilla rendering.
 			LOGGER.warn("System font setup failed; F3 keeps vanilla text", throwable);
 		}
 	}
