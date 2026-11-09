@@ -2,7 +2,7 @@ package com.ohmyf3.client.font;
 
 import com.mojang.blaze3d.platform.NativeImage;
 
-import com.ohmyf3.font.GlyphRasterizer;
+import com.ohmyf3.font.CoverageBitmap;
 
 /**
  * A shelf-packed glyph atlas backed by a {@link NativeImage}.
@@ -44,7 +44,7 @@ final class GlyphAtlas {
 	 * @param colour ARGB colour to bake into the glyph's opaque pixels
 	 * @return the placed rectangle, or {@code null} when the atlas is full
 	 */
-	Rect add(GlyphRasterizer.Bitmap bitmap, int colour) {
+	Rect add(CoverageBitmap bitmap, int colour) {
 		if (bitmap.width + PADDING * 2 > SIZE || bitmap.height + PADDING * 2 > SIZE) {
 			return null; // a single glyph larger than the atlas cannot be stored
 		}

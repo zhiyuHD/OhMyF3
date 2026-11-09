@@ -98,6 +98,50 @@ Two bugs worth remembering, both caught by checking output rather than trusting 
   atlas area then leaked garbage pixels into the texture and showed up as stray white
   blocks. The atlas is created with `true` (calloc).
 
+## Keyword icons
+
+Words on the debug screen get an icon in front of them. The icons are **copied one-to-one
+from the Lucide icon set** (`lucide-static` 1.70.0, ISC): the original 24x24 SVG path data
+with its 2px stroke, round caps and round joins.
+
+| Keyword | Icon | Lucide source |
+| --- | --- | --- |
+| `fps` | speedometer | `gauge` |
+| `MiB` | RAM stick | `memory-stick` |
+| `Chunk` | four tiles | `layout-grid` |
+| `XYZ` | reticle | `crosshair` |
+| `Sodium` | lightning bolt | `zap` |
+| `OpenGL` | processor | `cpu` |
+| `Java` | coffee cup | `coffee` |
+| `Seed` | dice | `dices` |
+
+`SvgPath` parses the path data (`M L H V C S Q T A Z`, absolute and relative, implicit
+linetos and repeated coordinate sets) and flattens curves and elliptical arcs to polylines.
+`IconPainter` strokes those polylines by distance field, 8x8 samples per pixel, which gives
+the same antialiasing the text gets. Because the stroke has round caps, Lucide's zero-length
+segments (`M6 18h.01`) render as dots for free.
+
+Icons are laid out as ordinary cells in the line, so they take part in width measurement and
+right-column alignment; only the first occurrence of a keyword per line gets an icon.
+
+## Text rendering quality
+
+Three separate problems made the first versions look bad, and each has a concrete cause:
+
+- **Glyphs were rasterised at 9px and blown up by the GUI scale.** They are now rasterised at
+  the current device ratio (`guiScale * poseScale`) and drawn at 1/N of that in GUI units.
+- **Quads can only be placed and sized on whole GUI pixels**, which are several screen pixels
+  wide, so rounding a glyph's bitmap size down to GUI units made the GUI scale resample it —
+  that is the soft, aliased look. The bitmap is padded out to the device grid
+  (`alignToDeviceGrid`) so one texel lands on exactly one screen pixel.
+- **Advances were integers**, which collapsed the font's side bearings and made some letter
+  pairs touch while others drifted apart. Advances are fractional now, and glyphs are placed
+  with a **subpixel pose translation** for the remainder, since the render state captures the
+  pose per quad.
+
+Known limits: the GUI blit API takes integer coordinates, so subpixel placement costs one
+matrix push/pop per glyph; and `§l`/`§o` are still ignored (only colours are applied).
+
 ## Requirements
 
 - **JDK 25** (not 21!). Minecraft 26.3 targets Java 25, so the toolchain must be 25.

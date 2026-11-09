@@ -13,33 +13,9 @@ import java.util.List;
  * per glyph.
  */
 public final class GlyphRasterizer {
-	private static final int SUBSAMPLES = 4;
+	private static final int SUBSAMPLES = 8;
 
 	private GlyphRasterizer() {
-	}
-
-	/**
-	 * One rasterised glyph.
-	 *
-	 * <p>{@code left}/{@code top} are the bitmap's offset from the glyph origin (the pen
-	 * position on the baseline), in pixels with y growing downwards, so the bitmap belongs at
-	 * {@code (penX + left, baselineY + top)}.
-	 */
-	public static final class Bitmap {
-		public final int width;
-		public final int height;
-		public final int left;
-		public final int top;
-		/** Row-major coverage in {@code [0, 255]}. */
-		public final byte[] coverage;
-
-		Bitmap(int width, int height, int left, int top, byte[] coverage) {
-			this.width = width;
-			this.height = height;
-			this.left = left;
-			this.top = top;
-			this.coverage = coverage;
-		}
 	}
 
 	/**
@@ -47,7 +23,7 @@ public final class GlyphRasterizer {
 	 *
 	 * @param scale pixels per font unit, i.e. {@code pixelSize / unitsPerEm}
 	 */
-	public static Bitmap rasterize(GlyphOutline outline, float scale) {
+	public static CoverageBitmap rasterize(GlyphOutline outline, float scale) {
 		if (outline == null || outline.isEmpty()) {
 			return null;
 		}
@@ -108,7 +84,7 @@ public final class GlyphRasterizer {
 			bytes[i] = (byte) Math.round(c * 255.0F);
 		}
 
-		return new Bitmap(width, height, left, top, bytes);
+		return new CoverageBitmap(width, height, left, top, bytes);
 	}
 
 	// ---------------------------------------------------------------- outline → edges
