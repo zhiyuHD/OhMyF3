@@ -260,9 +260,35 @@ public final class TtfTextRenderer {
 		List<Card> cards = new ArrayList<>();
 		List<Row> current = new ArrayList<>();
 
+		// Rows the player dragged out of the column are drawn as standalone cards first, and are
+		// excluded from the flow below so the column closes up behind them.
+		for (Row row : rows) {
+			String pinned = pinnedKey(row);
+
+			if (pinned == null) {
+				continue;
+			}
+
+			int[] position = OhMyF3Config.get().position(pinned);
+
+			if (position == null) {
+				continue;
+			}
+
+			int pinnedX = Math.round(position[0] * screenWidth / 1000.0F);
+			int pinnedY = Math.round(position[1] * graphics.guiHeight() / 1000.0F);
+			Card single = new Card(List.of(row), !row.vanilla());
+			int width = cardWidth(single);
+			int height = CARD_PADDING * 2 + lineHeight;
+			drawCard(graphics, pinnedX, pinnedY, width, height, !row.vanilla());
+			int maxKey = maxKeyWidth(single);
+			int valueColumn = pinnedX + CARD_PADDING + gutter() + (maxKey > 0 ? maxKey + KEY_GAP : 0);
+			drawRow(graphics, row, pinnedX, pinnedY + CARD_PADDING, valueColumn);
+		}
+
 		// Vanilla rows keep their blank-line grouping; mod rows are collected into one card.
 		for (Row row : rows) {
-			if (!row.vanilla()) {
+			if (!row.vanilla() || pinnedKey(row) != null) {
 				continue;
 			}
 
@@ -285,7 +311,7 @@ public final class TtfTextRenderer {
 		List<Row> mods = new ArrayList<>();
 
 		for (Row row : rows) {
-			if (!row.vanilla() && hasContent(row)) {
+			if (!row.vanilla() && hasContent(row) && pinnedKey(row) == null) {
 				mods.add(row);
 			}
 		}
@@ -317,10 +343,13 @@ public final class TtfTextRenderer {
 			lastRightCardWidth = cardWidth;
 		}
 
-		// User layout offsets for the two F3 columns (see the layout editor in settings).
-		int[] columnOffset = OhMyF3Config.get().offset(alignLeft ? "f3_left" : "f3_right");
-		int x = (alignLeft ? 2 : screenWidth - 2 - cardWidth) + Math.round(xOffset) + columnOffset[0];
-		int y = 2 + columnOffset[1];
+		// Absolute positions where the player dragged the columns, stored in permille of the screen
+		// so a resolution change keeps the arrangement proportional.
+		int[] columnPos = OhMyF3Config.get().position(alignLeft ? "column_left" : "column_right");
+		int guiHeight = graphics.guiHeight();
+		int x = columnPos != null ? Math.round(columnPos[0] * screenWidth / 1000.0F)
+				: (alignLeft ? 2 : screenWidth - 2 - cardWidth) + Math.round(xOffset);
+		int y = columnPos != null ? Math.round(columnPos[1] * guiHeight / 1000.0F) : 2;
 
 		for (Card card : cards) {
 			int height = CARD_PADDING * 2 + card.rows().size() * lineHeight;
@@ -335,6 +364,71 @@ public final class TtfTextRenderer {
 
 			y += height + CARD_GAP;
 		}
+	}
+
+	/**
+	 * Config key for a row the player may have pinned: {@code row:<field>}.
+	 *
+	 * <p>The field name (not the localised label or the value) is used so the position survives
+	 * language switches and changing numbers.
+	 */
+	private static String pinnedKey(Row row) {
+		if (row == null || row.raw() == null || row.raw().isEmpty() || !hasContent(row)) {
+			return null;
+		}
+
+		String key = EntryClassifier.classify(row.raw()).key();
+
+		return key == null || key.isEmpty() ? null : "row:" + key;
+	}
+
+	/**
+	 * Draws a preview of the column for the settings screen's layout editor: one card with the given
+	 * sample lines at an absolute position. Uses the same layout, font and card texture as the real
+	 * overlay, so what is dragged is what the player will see.
+	 */
+	public static void drawPreview(GuiGraphicsExtractor graphics, List<String> lines, int x, int y) {
+		if (!ready || lines == null || lines.isEmpty()) {
+			return;
+		}
+
+		List<Row> rows = new ArrayList<>(lines.size());
+
+		for (String line : lines) {
+			rows.add(line == null || line.isEmpty() ? Row.EMPTY : layout(line));
+		}
+
+		Card card = new Card(rows, false);
+		int width = cardWidth(card);
+		int height = CARD_PADDING * 2 + rows.size() * lineHeight;
+		drawCard(graphics, x, y, width, height, false);
+
+		int maxKey = maxKeyWidth(card);
+		int valueColumn = x + CARD_PADDING + gutter() + (maxKey > 0 ? maxKey + KEY_GAP : 0);
+
+		for (int index = 0; index < rows.size(); index++) {
+			drawRow(graphics, rows.get(index), x, y + CARD_PADDING + index * lineHeight, valueColumn);
+		}
+	}
+
+	/** Width the preview card would occupy, without drawing it. */
+	public static int previewWidth(List<String> lines) {
+		if (!ready || lines == null || lines.isEmpty()) {
+			return 0;
+		}
+
+		List<Row> rows = new ArrayList<>(lines.size());
+
+		for (String line : lines) {
+			rows.add(line == null || line.isEmpty() ? Row.EMPTY : layout(line));
+		}
+
+		return cardWidth(new Card(rows, false));
+	}
+
+	/** Height the preview card would occupy, without drawing it. */
+	public static int previewHeight(List<String> lines) {
+		return CARD_PADDING * 2 + (lines == null ? 0 : lines.size()) * lineHeight;
 	}
 
 	private record Card(List<Row> rows, boolean mods) {

@@ -40,8 +40,11 @@ public final class OhMyF3Config {
 	public boolean slideAnimation = true;
 
 	/**
-	 * Per-part offsets for the settings screen, keyed by part name ({@code header},
-	 * {@code appearance}, {@code effects}, {@code footer}). Missing entries mean "default".
+	 * Absolute positions for movable F3 elements, keyed by element id.
+	 *
+	 * <p>Keys are {@code column_left}, {@code column_right}, {@code pie}, or {@code row:<field>} for a
+	 * single line dragged out of its column. Values are {@code {x, y}} in GUI pixels relative to the
+	 * top-left of the debug screen; a missing key means "use the default anchor".
 	 */
 	public Map<String, int[]> layout = new LinkedHashMap<>();
 
@@ -83,13 +86,19 @@ public final class OhMyF3Config {
 		}
 	}
 
-	/** Offset of a layout part, in GUI pixels; {@code {0, 0}} when it was never moved. */
-	public int[] offset(String key) {
+	/** Absolute position of an element, or {@code null} when it still uses its default anchor. */
+	public int[] position(String key) {
 		int[] value = layout == null ? null : layout.get(key);
-		return value != null && value.length == 2 ? value : new int[] {0, 0};
+		return value != null && value.length == 2 ? value : null;
 	}
 
-	/** Moves a part and persists immediately. */
+	/** Offset from the default anchor, for callers that only need a relative nudge. */
+	public int[] offset(String key) {
+		int[] value = position(key);
+		return value == null ? new int[] {0, 0} : value;
+	}
+
+	/** Places an element at an absolute position and persists immediately. */
 	public void move(String key, int x, int y) {
 		if (layout == null) {
 			layout = new LinkedHashMap<>();

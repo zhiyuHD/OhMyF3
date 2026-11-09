@@ -3,11 +3,14 @@ package com.ohmyf3.client;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.ohmyf3.client.chart.PieChartRenderer;
+import com.ohmyf3.client.chart.PieLayout;
 import com.ohmyf3.client.font.TtfTextRenderer;
 import com.ohmyf3.client.ui.Anim;
 import com.ohmyf3.client.ui.M3;
 import com.ohmyf3.client.ui.Shapes;
 import com.ohmyf3.config.OhMyF3Config;
+import com.ohmyf3.font.EntryClassifier;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -15,15 +18,15 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.util.profiling.ResultField;
 
 /**
- * Material 3 settings screen.
+ * Material 3 settings screen with a full-screen layout editor for the F3 overlay.
  *
- * <p>Two modes. Normally it is a list of M3 list items with switches. In <em>layout mode</em> the
- * list is replaced by a miniature of the F3 screen where the three things the player can move — the
- * left column, the right column and the profiler pie — are dragged into place. The offsets are
- * stored in {@link OhMyF3Config#layout} and applied by the F3 renderer itself, so the editor changes
- * the real overlay rather than this screen's own arrangement.
+ * <p>Normal mode is a list of M3 list items. Layout mode covers the screen with a <em>dummy F3</em>
+ * built from sample data at the real size: the two columns, every individual row, and the profiler
+ * chart can each be dragged. Positions are stored in permille of the screen, so the arrangement
+ * survives resolution changes, and a single button restores the defaults.
  */
 public final class SettingsScreen extends Screen {
 	/** Left mouse button in the {@code InputConstants} numbering used by {@code MouseButtonEvent}. */
@@ -38,10 +41,29 @@ public final class SettingsScreen extends Screen {
 
 	private static final String OPEN_ANIM = "screen:open";
 
-	/** Config keys of the movable F3 parts. */
-	private static final String PART_LEFT = "f3_left";
-	private static final String PART_RIGHT = "f3_right";
-	private static final String PART_PIE = "f3_pie";
+	private static final String KEY_LEFT = "column_left";
+	private static final String KEY_RIGHT = "column_right";
+
+	/** Sample rows for the dummy overlay; the same classifier that handles real rows reads them. */
+	private static final List<String> MOCK_LEFT = List.of(
+			"XYZ: 128.305 / 70.000 / -256.912",
+			"Block: 128 70 -257",
+			"Chunk: 8 8 -17 in 0.0.0",
+			"Facing: north (Towards negative Z)",
+			"Biome: minecraft:plains",
+			"Light: 15 (15 sky, 0 block)");
+
+	private static final List<String> MOCK_RIGHT = List.of(
+			"Minecraft 26.3 (Fabric)",
+			"Mem: 42% 1024/2432 MiB",
+			"CPU: AMD Ryzen 7 7735H",
+			"Display: 2880x1800");
+
+	private static final List<ResultField> MOCK_PIE = List.of(
+			new ResultField("render", 44.0, 44.0, 1),
+			new ResultField("tick", 27.0, 27.0, 1),
+			new ResultField("chunk", 18.0, 18.0, 1),
+			new ResultField("other", 11.0, 11.0, 1));
 
 	private record Toggle(String label, String detail, java.util.function.BooleanSupplier getter,
 			java.util.function.Consumer<Boolean> setter) {
@@ -60,19 +82,22 @@ public final class SettingsScreen extends Screen {
 	private record Button(String key, String label, int x, int y, int width, int height, boolean filled) {
 	}
 
-	/** A draggable stand-in for one F3 element inside the miniature. */
-	private record Handle(String key, String label, int x, int y, int width, int height) {
+	/** Something the layout editor can drag: the column handle, one row, or the pie. */
+	private record Target(String configKey, String label, int x, int y, int width, int height) {
 	}
 
 	private final List<Button> buttons = new ArrayList<>();
 
+	/** Targets from the most recent layout-editor frame, reused for hit-testing. */
+	private List<Target> lastTargets = List.of();
+
 	private boolean layoutMode;
 
 	private String dragging;
+	private int dragOffsetPermilleX;
+	private int dragOffsetPermilleY;
 	private int dragStartX;
 	private int dragStartY;
-	private int dragOriginX;
-	private int dragOriginY;
 
 	public SettingsScreen() {
 		super(Component.literal("OhMyF3 设置"));
@@ -84,7 +109,7 @@ public final class SettingsScreen extends Screen {
 		buttons.clear();
 	}
 
-	// ---------------------------------------------------------------- geometry
+	// ---------------------------------------------------------------- panel geometry
 
 	private int panelX() {
 		return this.width / 2 - PANEL_WIDTH / 2;
@@ -123,28 +148,16 @@ public final class SettingsScreen extends Screen {
 				M3.ROW_HEIGHT};
 	}
 
-	/** The miniature canvas replaces the two sections while the layout is being edited. */
-	private int canvasX() {
-		return contentX();
-	}
-
-	private int canvasY() {
-		return appearanceY();
-	}
-
-	private int canvasWidth() {
-		return contentWidth();
-	}
-
-	private int canvasHeight() {
-		return SECTION_HEIGHT * 2 + GAP;
-	}
-
 	// ---------------------------------------------------------------- drawing
 
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partial) {
 		TtfTextRenderer.ensureDeviceScale(Minecraft.getInstance().getWindow().getGuiScale());
+
+		if (layoutMode) {
+			renderLayoutEditor(graphics, mouseX, mouseY);
+			return;
+		}
 
 		float open = Anim.value(OPEN_ANIM, 1.0F);
 		M3.scrim(graphics, this.width, this.height, open);
@@ -155,20 +168,9 @@ public final class SettingsScreen extends Screen {
 
 		M3.panel(graphics, panelX(), panelY(), PANEL_WIDTH, panelHeight());
 		TtfTextRenderer.drawString(graphics, "OhMyF3 设置", contentX(), panelY() + PADDING + 12, M3.ON_SURFACE);
-		TtfTextRenderer.drawString(graphics, layoutMode ? "拖动色块调整 F3 各元素的位置" : "F3 调试界面的外观与行为",
-				contentX(), panelY() + PADDING + 26, M3.ON_SURFACE_VARIANT_BRIGHT);
+		TtfTextRenderer.drawString(graphics, "F3 调试界面的外观与行为", contentX(), panelY() + PADDING + 26,
+				M3.ON_SURFACE_VARIANT_BRIGHT);
 
-		if (layoutMode) {
-			renderLayoutEditor(graphics, mouseX, mouseY);
-		} else {
-			renderSections(graphics, mouseX, mouseY);
-		}
-
-		renderFooter(graphics, mouseX, mouseY);
-		graphics.pose().popMatrix();
-	}
-
-	private void renderSections(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
 		M3.section(graphics, "外观", contentX(), appearanceY() + 9);
 		M3.section(graphics, "效果", contentX(), effectsY() + 9);
 
@@ -180,38 +182,21 @@ public final class SettingsScreen extends Screen {
 					toggle.getter().getAsBoolean(), hovered);
 			M3.drawRipple(graphics, "row:" + toggle.label(), rect[0], rect[1], rect[2], rect[3]);
 		}
+
+		renderFooter(graphics, mouseX, mouseY, footerY());
+		graphics.pose().popMatrix();
 	}
 
-	private void renderLayoutEditor(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
-		Shapes.outlined(graphics, canvasX(), canvasY(), canvasWidth(), canvasHeight(), M3.RADIUS_LARGE,
-				M3.SURFACE_CONTAINER, M3.OUTLINE_VARIANT);
-
-		for (Handle handle : handles()) {
-			boolean hovered = M3.inside(mouseX, mouseY, handle.x(), handle.y(), handle.width(), handle.height());
-			int fill = hovered || handle.key().equals(dragging) ? M3.PRIMARY_CONTAINER : M3.SURFACE_CONTAINER_HIGHEST;
-			Shapes.filled(graphics, handle.x(), handle.y(), handle.width(), handle.height(), M3.RADIUS_SMALL, fill);
-
-			int labelWidth = TtfTextRenderer.stringWidth(handle.label());
-			TtfTextRenderer.drawString(graphics, handle.label(),
-					handle.x() + (handle.width() - labelWidth) / 2.0F,
-					handle.y() + handle.height() / 2 + TtfTextRenderer.lineHeight() / 2 - 2,
-					hovered ? M3.ON_PRIMARY_CONTAINER : M3.ON_SURFACE_VARIANT_BRIGHT);
-		}
-	}
-
-	private void renderFooter(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
-		int y = footerY();
+	private void renderFooter(GuiGraphicsExtractor graphics, int mouseX, int mouseY, int y) {
 		int height = FOOTER_HEIGHT;
 		int x = contentX();
-
 		int doneWidth = 84;
 		int modeWidth = 96;
 		int resetWidth = 84;
 
 		buttons.clear();
 		buttons.add(new Button("done", "完成", x, y, doneWidth, height, true));
-		buttons.add(new Button("mode", layoutMode ? "结束调整" : "调整 F3 布局", x + doneWidth + 8, y, modeWidth, height,
-				false));
+		buttons.add(new Button("mode", "调整 F3 布局", x + doneWidth + 8, y, modeWidth, height, false));
 		buttons.add(new Button("reset", "恢复默认", x + doneWidth + modeWidth + 16, y, resetWidth, height, false));
 
 		for (Button button : buttons) {
@@ -229,40 +214,140 @@ public final class SettingsScreen extends Screen {
 		}
 	}
 
+	// ---------------------------------------------------------------- layout editor
+
+	private void renderLayoutEditor(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		graphics.fill(0, 0, this.width, this.height, 0x8C000000);
+
+		TtfTextRenderer.drawString(graphics, "拖动组件调整 F3 布局（位置按屏幕比例保存）", 12, 24, M3.ON_SURFACE);
+		TtfTextRenderer.drawString(graphics, "拖标题条移动整列，拖某一行可单独摆放，拖饼图连背景一起移动", 12, 40,
+				M3.ON_SURFACE_VARIANT_BRIGHT);
+
+		List<Target> targets = targets(graphics);
+		lastTargets = targets;
+
+		for (Target target : targets) {
+			boolean active = target.configKey().equals(dragging);
+
+			if (active) {
+				Shapes.dragOutline(graphics, target.x() - 3, target.y() - 3, target.width() + 6, target.height() + 6,
+						0xA0D0BCFF);
+			}
+		}
+
+		// Bottom action bar, floating over the dummy overlay.
+		int barWidth = 80 * 3 + 16;
+		int barX = this.width / 2 - barWidth / 2;
+		int barY = this.height - 44;
+		Shapes.filled(graphics, barX - 10, barY - 8, barWidth + 20, 48, M3.RADIUS_EXTRA_LARGE, M3.SURFACE);
+
+		buttons.clear();
+		buttons.add(new Button("done", "完成", barX, barY, 80, 32, true));
+		buttons.add(new Button("mode", "结束调整", barX + 88, barY, 80, 32, false));
+		buttons.add(new Button("reset", "恢复默认", barX + 176, barY, 80, 32, false));
+
+		for (Button button : buttons) {
+			boolean hovered = M3.inside(mouseX, mouseY, button.x(), button.y(), button.width(), button.height());
+
+			if (button.filled()) {
+				M3.filledButton(graphics, button.x(), button.y(), button.width(), button.height(), button.label(),
+						hovered);
+			} else {
+				M3.textButton(graphics, button.x(), button.y(), button.width(), button.height(), button.label(),
+						hovered);
+			}
+
+			M3.drawRipple(graphics, "btn:" + button.key(), button.x(), button.y(), button.width(), button.height());
+		}
+	}
+
 	/**
-	 * The three movable F3 elements, laid out inside the miniature.
+	 * Draws the dummy overlay and returns everything that can be dragged.
 	 *
-	 * <p>Preview coordinates are the canonical positions plus the stored offset scaled down, so
-	 * dragging a block moves the real overlay by the same relative amount.
+	 * <p>This runs during extraction, so the preview and the hit boxes are always built from the same
+	 * positions — a drag can never "miss" because the pointer was tested against last frame's layout.
 	 */
-	private List<Handle> handles() {
+	private List<Target> targets(GuiGraphicsExtractor graphics) {
+		List<Target> targets = new ArrayList<>(16);
 		OhMyF3Config config = OhMyF3Config.get();
-		int x = canvasX();
-		int y = canvasY();
-		int width = canvasWidth();
-		int height = canvasHeight();
 
-		float scaleX = width / (float) Math.max(1, this.width);
-		float scaleY = height / (float) Math.max(1, this.height);
+		targets.addAll(column(graphics, KEY_LEFT, "左列", MOCK_LEFT, config, true));
+		targets.addAll(column(graphics, KEY_RIGHT, "右列", MOCK_RIGHT, config, false));
+		targets.add(pie(graphics, config));
+		return targets;
+	}
 
-		int columnWidth = Math.round(width * 0.28F);
-		int columnHeight = Math.round(height * 0.66F);
-		int pieSize = Math.round(height * 0.34F);
+	private List<Target> column(GuiGraphicsExtractor graphics, String key, String label, List<String> lines,
+			OhMyF3Config config, boolean left) {
+		List<Target> targets = new ArrayList<>();
+		List<String> visible = new ArrayList<>(lines);
 
-		int[] left = config.offset(PART_LEFT);
-		int[] right = config.offset(PART_RIGHT);
-		int[] pie = config.offset(PART_PIE);
+		// Pinned rows are drawn on their own, exactly like the real overlay does.
+		for (String line : lines) {
+			int[] position = config.position(rowKey(line));
 
-		List<Handle> handles = new ArrayList<>(3);
-		handles.add(new Handle(PART_LEFT, "左列",
-				x + 4 + Math.round(left[0] * scaleX), y + 4 + Math.round(left[1] * scaleY), columnWidth, columnHeight));
-		handles.add(new Handle(PART_RIGHT, "右列",
-				x + width - 4 - columnWidth + Math.round(right[0] * scaleX), y + 4 + Math.round(right[1] * scaleY),
-				columnWidth, columnHeight));
-		handles.add(new Handle(PART_PIE, "饼图",
-				x + Math.round(width * 0.55F) + Math.round(pie[0] * scaleX),
-				y + Math.round(height * 0.45F) + Math.round(pie[1] * scaleY), pieSize, pieSize));
-		return handles;
+			if (position != null) {
+				visible.remove(line);
+			}
+		}
+
+		int width = Math.max(60, TtfTextRenderer.previewWidth(visible));
+		int height = TtfTextRenderer.previewHeight(visible);
+		int defaultX = left ? 2 : this.width - 2 - width;
+		int[] stored = config.position(key);
+		int x = stored != null ? Math.round(stored[0] * this.width / 1000.0F) : defaultX;
+		int y = stored != null ? Math.round(stored[1] * this.height / 1000.0F) : 2;
+
+		// Grab bar above the card: dragging it moves the whole column.
+		Shapes.filled(graphics, x, y - 14, Math.min(width, 60), 12, 6, M3.SURFACE_CONTAINER_HIGHEST);
+		TtfTextRenderer.drawString(graphics, label, x + 6, y - 4, M3.ON_SURFACE_VARIANT_BRIGHT);
+		TtfTextRenderer.drawPreview(graphics, visible, x, y);
+
+		targets.add(new Target(key, label, x, y - 14, Math.min(width, 60), 12));
+
+		for (int index = 0; index < visible.size(); index++) {
+			int rowY = y + 3 + index * TtfTextRenderer.lineHeight();
+			targets.add(new Target(rowKey(visible.get(index)), "行", x, rowY, width, TtfTextRenderer.lineHeight()));
+		}
+
+		for (String line : lines) {
+			int[] position = config.position(rowKey(line));
+
+			if (position == null) {
+				continue;
+			}
+
+			int pinnedX = Math.round(position[0] * this.width / 1000.0F);
+			int pinnedY = Math.round(position[1] * this.height / 1000.0F);
+			int pinnedWidth = Math.max(60, TtfTextRenderer.previewWidth(List.of(line)));
+			TtfTextRenderer.drawPreview(graphics, List.of(line), pinnedX, pinnedY);
+			targets.add(new Target(rowKey(line), "行", pinnedX, pinnedY, pinnedWidth,
+					TtfTextRenderer.previewHeight(List.of(line))));
+		}
+
+		return targets;
+	}
+
+	private Target pie(GuiGraphicsExtractor graphics, OhMyF3Config config) {
+		int[] centre = PieLayout.targetCentre(this.width, this.height);
+		int size = 124;
+		int left = centre[0] - size / 2;
+		int top = centre[1] - size / 2;
+
+		Shapes.filled(graphics, left - 8, top - 8, size + 16, size + 16, M3.RADIUS_LARGE,
+				M3.SURFACE_CONTAINER);
+		PieChartRenderer.render(graphics, MOCK_PIE, left, top, left + size, top + size);
+
+		return new Target(PieLayout.KEY, "饼图", left - 8, top - 8, size + 16, size + 16);
+	}
+
+	private List<Target> hitTargets() {
+		return lastTargets;
+	}
+
+	private static String rowKey(String line) {
+		String key = EntryClassifier.classify(line).key();
+		return "row:" + (key == null || key.isEmpty() ? line : key);
 	}
 
 	// ---------------------------------------------------------------- input
@@ -272,7 +357,6 @@ public final class SettingsScreen extends Screen {
 		double mouseX = event.x();
 		double mouseY = event.y();
 
-		// MouseButtonEvent reports InputConstants codes, where the left button is 1.
 		if (event.button() != LEFT_BUTTON) {
 			return super.mouseClicked(event, quickMove);
 		}
@@ -286,16 +370,26 @@ public final class SettingsScreen extends Screen {
 		}
 
 		if (layoutMode) {
-			for (Handle handle : handles()) {
-				if (M3.inside(mouseX, mouseY, handle.x(), handle.y(), handle.width(), handle.height())) {
-					dragging = handle.key();
-					dragStartX = (int) mouseX;
-					dragStartY = (int) mouseY;
-					int[] offset = OhMyF3Config.get().offset(handle.key());
-					dragOriginX = offset[0];
-					dragOriginY = offset[1];
-					return true;
+			List<Target> targets = this.hitTargets();
+
+			// Later targets are drawn on top (pinned rows, then the pie), so search backwards.
+			for (int i = targets.size() - 1; i >= 0; i--) {
+				Target target = targets.get(i);
+
+				if (!M3.inside(mouseX, mouseY, target.x(), target.y(), target.width(), target.height())) {
+					continue;
 				}
+
+				dragging = target.configKey();
+				dragStartX = (int) mouseX;
+				dragStartY = (int) mouseY;
+
+				int[] stored = OhMyF3Config.get().position(target.configKey());
+				int currentPermilleX = stored != null ? stored[0] : Math.round(target.x() * 1000.0F / this.width);
+				int currentPermilleY = stored != null ? stored[1] : Math.round(target.y() * 1000.0F / this.height);
+				dragOffsetPermilleX = currentPermilleX - (int) Math.round(mouseX * 1000.0F / this.width);
+				dragOffsetPermilleY = currentPermilleY - (int) Math.round(mouseY * 1000.0F / this.height);
+				return true;
 			}
 
 			return true;
@@ -322,17 +416,8 @@ public final class SettingsScreen extends Screen {
 			return super.mouseDragged(event, dragX, dragY);
 		}
 
-		float scaleX = canvasWidth() / (float) Math.max(1, this.width);
-		float scaleY = canvasHeight() / (float) Math.max(1, this.height);
-
-		int offsetX = dragOriginX + Math.round(((float) event.x() - dragStartX) / scaleX);
-		int offsetY = dragOriginY + Math.round(((float) event.y() - dragStartY) / scaleY);
-
-		// Keep the offsets sane: a part can be nudged, not exiled off the screen.
-		int limitX = this.width / 2;
-		int limitY = this.height / 2;
-		offsetX = Math.max(-limitX, Math.min(limitX, offsetX));
-		offsetY = Math.max(-limitY, Math.min(limitY, offsetY));
+		int permilleX = Math.round((float) event.x() * 1000.0F / this.width) + dragOffsetPermilleX;
+		int permilleY = Math.round((float) event.y() * 1000.0F / this.height) + dragOffsetPermilleY;
 
 		OhMyF3Config config = OhMyF3Config.get();
 
@@ -340,8 +425,12 @@ public final class SettingsScreen extends Screen {
 			config.layout = new java.util.LinkedHashMap<>();
 		}
 
-		config.layout.put(dragging, new int[] {offsetX, offsetY});
+		config.layout.put(dragging, new int[] {clamp(permilleX), clamp(permilleY)});
 		return true;
+	}
+
+	private static int clamp(int permille) {
+		return Math.max(-200, Math.min(1200, permille));
 	}
 
 	@Override
