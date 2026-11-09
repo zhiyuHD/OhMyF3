@@ -34,6 +34,9 @@ public final class SettingsScreen extends Screen {
 	private static final int SECTION_HEIGHT = 12 + M3.ROW_HEIGHT * 2 + M3.ROW_GAP;
 	private static final int FOOTER_HEIGHT = 32;
 
+	/** Left mouse button in the {@code InputConstants} numbering used by {@code MouseButtonEvent}. */
+	private static final int LEFT_BUTTON = 1;
+
 	private static final String PART_HEADER = "header";
 	private static final String PART_APPEARANCE = "appearance";
 	private static final String PART_EFFECTS = "effects";
@@ -136,8 +139,12 @@ public final class SettingsScreen extends Screen {
 
 	// ---------------------------------------------------------------- drawing
 
+	private static long lastDiag;
+
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partial) {
+		int guiScale = Minecraft.getInstance().getWindow().getGuiScale();
+		TtfTextRenderer.ensureDeviceScale(guiScale);
 		M3.scrim(graphics, this.width, this.height);
 		M3.panel(graphics, panelX(), panelY(), PANEL_WIDTH, panelHeight());
 
@@ -217,7 +224,10 @@ public final class SettingsScreen extends Screen {
 		double mouseX = event.x();
 		double mouseY = event.y();
 
-		if (event.button() != 0) {
+		// MouseButtonEvent reports InputConstants codes, where the left button is 1 (GLFW's 0 is
+		// remapped by the input layer), so comparing against 0 would treat every left click as a
+		// right click.
+		if (event.button() != LEFT_BUTTON) {
 			return super.mouseClicked(event, quickMove);
 		}
 

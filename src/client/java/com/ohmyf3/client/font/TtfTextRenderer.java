@@ -545,7 +545,40 @@ public final class TtfTextRenderer {
 			return 0.0F;
 		}
 
-		return drawCells(graphics, cellsFor(text, color), x, baseline);
+		List<Cell> cells = cellsFor(text, color);
+		flushAtlas();
+		return drawCells(graphics, cells, x, baseline);
+	}
+
+	/**
+	 * Pushes newly rasterised glyphs to the atlas texture.
+	 *
+	 * <p>The F3 path flushes once per column after laying out its rows; this entry point can be the
+	 * first thing to draw (the settings screen), so it has to flush itself or its glyphs stay in the
+	 * CPU bitmap and the texture renders empty.
+	 */
+	private static void flushAtlas() {
+		if (atlas != null && texture != null && atlas.isDirty()) {
+			texture.upload();
+			atlas.clearDirty();
+		}
+	}
+
+	/**
+	 * Ensures glyphs are rasterised for the given device scale.
+	 *
+	 * <p>The F3 overlay rebuilds the atlas from the pose scale it observes; screens draw at the
+	 * plain GUI scale, so without this the first screen to open would bake 1x glyphs and every later
+	 * draw would upscale them — visibly blurry text.
+	 */
+	public static void ensureDeviceScale(int scale) {
+		ensureInitialised();
+
+		if (!ready || scale <= 0 || scale == deviceScale) {
+			return;
+		}
+
+		rebuildAtlas(scale);
 	}
 
 	/** Width of {@code text} in GUI pixels, with the same metrics {@link #drawString} uses. */
@@ -557,8 +590,10 @@ public final class TtfTextRenderer {
 		}
 
 		float width = 0.0F;
+		List<Cell> cells = cellsFor(text, DEFAULT_COLOR);
+		flushAtlas();
 
-		for (Cell cell : cellsFor(text, DEFAULT_COLOR)) {
+		for (Cell cell : cells) {
 			width += cell.advance();
 		}
 
