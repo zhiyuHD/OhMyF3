@@ -55,6 +55,49 @@ private static final float SLIDE_DISTANCE = 200.0F;            // start offset i
 Negative `SLIDE_DISTANCE` slides in from the right; `SlideInAnimation` also accepts a second
 constructor argument that holds the panel displaced for a moment before it starts moving.
 
+## System font rendering for the debug screen
+
+The F3 text is drawn with a **system TrueType font** instead of Minecraft's bitmap font.
+The TTF engine is written from scratch — no FreeType, no fontconfig parsing library, no
+AWT rasterizer — because the point was to own the pipeline end to end.
+
+| File | Role |
+| --- | --- |
+| `src/main/java/com/ohmyf3/font/TtfFont.java` | TrueType parser: `head`, `maxp`, `hhea`, `hmtx`, `cmap` 4/12, `loca`, `glyf`, composite glyphs |
+| `src/main/java/com/ohmyf3/font/GlyphOutline.java` | Contours in font units, on/off-curve points preserved |
+| `src/main/java/com/ohmyf3/font/GlyphRasterizer.java` | Quadratic flattening + non-zero winding fill, exact horizontal coverage and 4x vertical supersampling |
+| `src/main/java/com/ohmyf3/font/SystemFonts.java` | Finds a font: `-Dohmyf3.font=`, `OHMYF3_FONT`, `fc-match`, then a scan of the usual directories |
+| `src/client/java/com/ohmyf3/client/font/GlyphAtlas.java` | Shelf-packs glyphs into one 1024x1024 atlas |
+| `src/client/java/com/ohmyf3/client/font/TtfTextRenderer.java` | Texture upload, layout, formatting codes, quad emission |
+
+How it fits into 26.3:
+
+- `DebugScreenOverlay#extractLines` is hooked; the injection draws both columns itself and
+  cancels vanilla. If no usable font is found the injection does **not** cancel, so the
+  screen silently stays with vanilla text.
+- Glyphs are rasterised at the current **device** pixel ratio (GUI scale times the pose
+  scale the overlay applies) and drawn at 1/N of that in GUI units, so atlas texels land on
+  screen pixels one-to-one. Rasterising at the nominal 9px and letting the GUI scale blow
+  it up is what made the first attempt look blurry.
+- Glyph colour is baked into the atlas (the GUI blit path has no tint parameter), so the
+  atlas is keyed by `(code point, colour)`. Legacy `§` formatting codes are parsed and
+  removed from the layout, which also matters for width computation: mods colour their
+  debug lines with `§7`, `§a`, `§r`, and drawing those literally used to show up as "§7" in
+  the text.
+- Mod compatibility: other mods contribute lines through `DebugScreenDisplayer`, which end
+  up in the same `List<String>` and are therefore drawn with the same font, colours and
+  layout. Nothing is filtered or reordered.
+
+Two bugs worth remembering, both caught by checking output rather than trusting the code:
+
+- Simple-glyph x and y coordinates use **different flag bits** (`0x02`/`0x10` for x,
+  `0x04`/`0x20` for y). Decoding both axes with the x bits left every y coordinate garbage,
+  which stretched glyphs into 200-450px tall white bars. `TtfGlyphBoundsTest` now compares
+  parsed outlines against the bounding boxes stored in `glyf` for all of ASCII.
+- `new NativeImage(format, w, h, false)` leaves the buffer **uninitialised**; the unused
+  atlas area then leaked garbage pixels into the texture and showed up as stray white
+  blocks. The atlas is created with `true` (calloc).
+
 ## Requirements
 
 - **JDK 25** (not 21!). Minecraft 26.3 targets Java 25, so the toolchain must be 25.

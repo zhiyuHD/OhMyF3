@@ -14,6 +14,14 @@ repositories {
 	// Add repositories to retrieve artifacts from in here.
 	// You should only use this when depending on other mods because
 	// Loom adds the essential maven repositories to download Minecraft and libraries from automatically.
+
+	maven {
+		name = "Modrinth"
+		url = "https://api.modrinth.com/maven"
+		content {
+			includeGroup "maven.modrinth"
+		}
+	}
 }
 
 loom {
@@ -34,6 +42,12 @@ dependencies {
 
 	// Fabric API. This is technically optional, but you probably want it anyway.
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+
+	// Sodium, for the development client only: this mod never compiles against it.
+	// Loom 1.19 no longer provides modRuntimeOnly/modLocalRuntime, and dev mods are
+	// discovered from the runtime classpath (that is how fabric-api is added below),
+	// so a plain runtimeOnly dependency is the correct way to get Sodium into runClient.
+	runtimeOnly "maven.modrinth:sodium:${project.sodium_version}"
 
 	testImplementation platform("org.junit:junit-bom:5.11.4")
 	testImplementation "org.junit.jupiter:junit-jupiter"

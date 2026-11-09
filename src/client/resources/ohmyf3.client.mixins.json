@@ -3,6 +3,7 @@
 	"package": "com.ohmyf3.client.mixin",
 	"compatibilityLevel": "JAVA_25",
 	"client": [
+		"DebugScreenOverlayMixin",
 		"HudMixin"
 	],
 	"injectors": {

@@ -34,3 +34,5 @@ replay_*.log
 
 # local
 .meta/
+.dev/
+.demo/
