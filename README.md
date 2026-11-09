@@ -1,6 +1,6 @@
 # OhMyF3
 
-A Fabric mod scaffold for **Minecraft 26.3**.
+A Fabric mod for **Minecraft 26.3** that slides the F3 debug screen in from the left.
 
 Minecraft `26.3` is a real, released version (2026-09-15), published under Mojang's
 year-based version naming scheme that replaced the old `1.x` numbering.
@@ -17,6 +17,43 @@ Every value below was checked against the official metadata rather than assumed:
 | Fabric API | `0.165.2+26.3` | Modrinth project `fabric-api` |
 | Java | **25** | Mojang `26.3.json` → `javaVersion.majorVersion = 25` |
 | Gradle | `9.8.2` | Gradle wrapper |
+
+## The F3 slide-in animation
+
+Pressing F3 now slides the debug overlay in from the left over ~260 ms with an
+ease-out curve, instead of it popping into place.
+
+| File | Role |
+| --- | --- |
+| `src/main/java/com/ohmyf3/animation/SlideInAnimation.java` | Pure timing/easing math, no Minecraft types |
+| `src/client/java/com/ohmyf3/client/mixin/HudMixin.java` | Applies the offset to the HUD extraction pose |
+| `src/test/java/com/ohmyf3/animation/SlideInAnimationTest.java` | Unit tests for the easing and the restart behaviour |
+
+How it works: 26.3 renders the HUD with an extract/draw split. `Hud.extractDebugOverlay`
+records the debug overlay's geometry into a `GuiGraphicsExtractor`, and every vertex it
+emits is baked with the extractor's current pose (`extractor.pose()`, a
+`org.joml.Matrix3x2fStack`). Pushing a translation around that single call therefore moves
+the entire overlay.
+
+`Hud.extractDebugOverlay` was chosen as the hook because:
+
+- it runs every frame, so opening and closing F3 can both be observed. The only exception
+  is the debug-options screen, which skips the call entirely;
+- its body is a single call with one return path, so the `@Inject` at `HEAD` (push +
+  translate) and the one at `RETURN` (pop) always pair up. MixinExtras is not bundled with
+  Fabric Loader 0.20.1, so `@WrapMethod` was not available here;
+- visibility comes from `DebugScreenOverlay#showDebugScreen()`, the same check the overlay
+  itself uses before extracting anything.
+
+Tuning is two constants at the top of `HudMixin`:
+
+```java
+private static final long SLIDE_DURATION_NANOS = 260_000_000L; // slide length
+private static final float SLIDE_DISTANCE = 200.0F;            // start offset in GUI px
+```
+
+Negative `SLIDE_DISTANCE` slides in from the right; `SlideInAnimation` also accepts a second
+constructor argument that holds the panel displaced for a moment before it starts moving.
 
 ## Requirements
 

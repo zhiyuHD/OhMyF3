@@ -19,7 +19,6 @@
 		]
 	},
 	"mixins": [
-		"ohmyf3.mixins.json",
 		{
 			"config": "ohmyf3.client.mixins.json",
 			"environment": "client"
