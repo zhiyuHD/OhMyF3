@@ -10,7 +10,6 @@ import com.ohmyf3.client.ui.Anim;
 import com.ohmyf3.client.ui.M3;
 import com.ohmyf3.client.ui.Shapes;
 import com.ohmyf3.config.OhMyF3Config;
-import com.ohmyf3.font.EntryClassifier;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -44,20 +43,29 @@ public final class SettingsScreen extends Screen {
 	private static final String KEY_LEFT = "column_left";
 	private static final String KEY_RIGHT = "column_right";
 
-	/** Sample rows for the dummy overlay; the same classifier that handles real rows reads them. */
-	private static final List<String> MOCK_LEFT = List.of(
-			"XYZ: 128.305 / 70.000 / -256.912",
-			"Block: 128 70 -257",
-			"Chunk: 8 8 -17 in 0.0.0",
-			"Facing: north (Towards negative Z)",
-			"Biome: minecraft:plains",
-			"Light: 15 (15 sky, 0 block)");
+	/**
+	 * One sample row: the text shown, plus the key it is dragged under.
+	 *
+	 * <p>The key matches the classifier key of the corresponding real row, so dragging the sample
+	 * "XYZ" moves the real XYZ line rather than inventing a position keyed on the sample text.
+	 */
+	private record MockRow(String key, String line) {
+	}
 
-	private static final List<String> MOCK_RIGHT = List.of(
-			"Minecraft 26.3 (Fabric)",
-			"Mem: 42% 1024/2432 MiB",
-			"CPU: AMD Ryzen 7 7735H",
-			"Display: 2880x1800");
+	/** Sample rows for the dummy overlay. */
+	private static final List<MockRow> MOCK_LEFT = List.of(
+			new MockRow("xyz", "XYZ: 128.305 / 70.000 / -256.912"),
+			new MockRow("block", "Block: 128 70 -257"),
+			new MockRow("chunk", "Chunk: 8 8 -17 in 0.0.0"),
+			new MockRow("facing", "Facing: north (Towards negative Z)"),
+			new MockRow("biome", "Biome: minecraft:plains"),
+			new MockRow("light", "Light: 15 (15 sky, 0 block)"));
+
+	private static final List<MockRow> MOCK_RIGHT = List.of(
+			new MockRow("game_version", "Minecraft 26.3 (Fabric)"),
+			new MockRow("memory", "Mem: 42% 1024/2432 MiB"),
+			new MockRow("cpu", "CPU: AMD Ryzen 7 7735H"),
+			new MockRow("display", "Display: 2880x1800"));
 
 	private static final List<ResultField> MOCK_PIE = List.of(
 			new ResultField("render", 44.0, 44.0, 1),
@@ -281,18 +289,24 @@ public final class SettingsScreen extends Screen {
 		return targets;
 	}
 
-	private List<Target> column(GuiGraphicsExtractor graphics, String key, String label, List<String> lines,
+	private List<Target> column(GuiGraphicsExtractor graphics, String key, String label, List<MockRow> rows,
 			OhMyF3Config config, boolean left) {
 		List<Target> targets = new ArrayList<>();
-		List<String> visible = new ArrayList<>(lines);
+		List<MockRow> flowing = new ArrayList<>(rows);
+		List<MockRow> pinned = new ArrayList<>();
 
 		// Pinned rows are drawn on their own, exactly like the real overlay does.
-		for (String line : lines) {
-			int[] position = config.position(rowKey(line));
-
-			if (position != null) {
-				visible.remove(line);
+		for (MockRow row : rows) {
+			if (config.position("row:" + row.key()) != null) {
+				flowing.remove(row);
+				pinned.add(row);
 			}
+		}
+
+		List<String> visible = new ArrayList<>(flowing.size());
+
+		for (MockRow row : flowing) {
+			visible.add(row.line());
 		}
 
 		int width = Math.max(60, TtfTextRenderer.previewWidth(visible));
@@ -321,24 +335,20 @@ public final class SettingsScreen extends Screen {
 
 		targets.add(new Target(key, label, x, grabY, grabWidth, 12));
 
-		for (int index = 0; index < visible.size(); index++) {
+		for (int index = 0; index < flowing.size(); index++) {
 			int rowY = y + 3 + index * TtfTextRenderer.lineHeight();
-			targets.add(new Target(rowKey(visible.get(index)), "行", x, rowY, width, TtfTextRenderer.lineHeight()));
+			targets.add(new Target("row:" + flowing.get(index).key(), "行", x, rowY, width,
+					TtfTextRenderer.lineHeight()));
 		}
 
-		for (String line : lines) {
-			int[] position = config.position(rowKey(line));
-
-			if (position == null) {
-				continue;
-			}
-
+		for (MockRow row : pinned) {
+			int[] position = config.position("row:" + row.key());
 			int pinnedX = Math.round(position[0] * this.width / 1000.0F);
 			int pinnedY = Math.round(position[1] * this.height / 1000.0F);
-			int pinnedWidth = Math.max(60, TtfTextRenderer.previewWidth(List.of(line)));
-			TtfTextRenderer.drawPreview(graphics, List.of(line), pinnedX, pinnedY);
-			targets.add(new Target(rowKey(line), "行", pinnedX, pinnedY, pinnedWidth,
-					TtfTextRenderer.previewHeight(List.of(line))));
+			int pinnedWidth = Math.max(60, TtfTextRenderer.previewWidth(List.of(row.line())));
+			TtfTextRenderer.drawPreview(graphics, List.of(row.line()), pinnedX, pinnedY);
+			targets.add(new Target("row:" + row.key(), "行", pinnedX, pinnedY, pinnedWidth,
+					TtfTextRenderer.previewHeight(List.of(row.line()))));
 		}
 
 		return targets;
@@ -359,11 +369,6 @@ public final class SettingsScreen extends Screen {
 
 	private List<Target> hitTargets() {
 		return lastTargets;
-	}
-
-	private static String rowKey(String line) {
-		String key = EntryClassifier.classify(line).key();
-		return "row:" + (key == null || key.isEmpty() ? line : key);
 	}
 
 	// ---------------------------------------------------------------- input
