@@ -31,8 +31,10 @@ class IconPainterTest {
 			}
 
 			// Every icon must actually draw something, and no icon may be a solid block:
-			// that would mean the primitives collapsed into a filled square.
-			assertTrue(drawn > 12, icon + " drew only " + drawn + " pixels");
+			// that would mean the primitives collapsed into a filled square. The bullet is
+			// deliberately tiny, so it only has to be visible.
+			int minimum = icon == IconPainter.Icon.DOT ? 3 : 12;
+			assertTrue(drawn > minimum, icon + " drew only " + drawn + " pixels");
 			assertTrue(drawn < 81, icon + " filled the whole tile (" + drawn + " pixels)");
 			assertTrue(partial > 0, icon + " has no antialiased edge pixels");
 		}

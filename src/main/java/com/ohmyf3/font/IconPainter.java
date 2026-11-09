@@ -45,7 +45,27 @@ public final class IconPainter {
 		/** {@code coffee}: cup with steam. */
 		CUP,
 		/** {@code dices}: two dice. */
-		DICE
+		DICE,
+		/** {@code leaf}: biome / world. */
+		LEAF,
+		/** {@code clock}: time and day. */
+		CLOCK,
+		/** {@code sun}: light level. */
+		SUN,
+		/** {@code compass}: facing direction. */
+		COMPASS,
+		/** {@code package}: size / entity counts. */
+		PACKAGE,
+		/** {@code activity}: timings and queues. */
+		ACTIVITY,
+		/** {@code wifi}: network and ping. */
+		WIFI,
+		/** {@code server}: dedicated/integrated server. */
+		SERVER,
+		/** {@code settings}: toggles and charts. */
+		SETTINGS,
+		/** Fallback bullet for rows we cannot classify. */
+		DOT
 	}
 
 	/**
@@ -56,6 +76,10 @@ public final class IconPainter {
 	public static CoverageBitmap paint(Icon icon, int pixelSize) {
 		if (icon == Icon.SODIUM) {
 			return paintSodiumLogo(pixelSize);
+		}
+
+		if (icon == Icon.DOT) {
+			return paintDot(pixelSize);
 		}
 
 		List<float[]> geometry = geometry(icon);
@@ -76,6 +100,35 @@ public final class IconPainter {
 						float y = (py + (sy + 0.5F) / SUBSAMPLES) / scale;
 
 						if (distanceToGeometry(geometry, x, y) <= STROKE_WIDTH * 0.5F) {
+							inside++;
+						}
+					}
+				}
+
+				coverage[py * pixelSize + px] = (byte) Math.round(255.0F * inside / samples);
+			}
+		}
+
+		return new CoverageBitmap(pixelSize, pixelSize, 0, 0, coverage);
+	}
+
+	/** A filled bullet, used as the fallback icon for rows we cannot classify. */
+	private static CoverageBitmap paintDot(int pixelSize) {
+		byte[] coverage = new byte[pixelSize * pixelSize];
+		float centre = pixelSize / 2.0F;
+		float radius = pixelSize * 0.17F;
+		int samples = SUBSAMPLES * SUBSAMPLES;
+
+		for (int py = 0; py < pixelSize; py++) {
+			for (int px = 0; px < pixelSize; px++) {
+				int inside = 0;
+
+				for (int sy = 0; sy < SUBSAMPLES; sy++) {
+					for (int sx = 0; sx < SUBSAMPLES; sx++) {
+						float x = px + (sx + 0.5F) / SUBSAMPLES - centre;
+						float y = py + (sy + 0.5F) / SUBSAMPLES - centre;
+
+						if (x * x + y * y <= radius * radius) {
 							inside++;
 						}
 					}
@@ -202,6 +255,58 @@ public final class IconPainter {
 				shapes.addAll(SvgPath.parse("M6 2v2"));
 				shapes.addAll(SvgPath.parse(
 						"M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1"));
+			}
+			case LEAF -> {
+				shapes.addAll(SvgPath.parse(
+						"M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"));
+				shapes.addAll(SvgPath.parse("M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"));
+			}
+			case CLOCK -> {
+				shapes.add(SvgPath.circle(12, 12, 10));
+				shapes.addAll(SvgPath.parse("M12 6v6l4 2"));
+			}
+			case SUN -> {
+				shapes.add(SvgPath.circle(12, 12, 4));
+				shapes.addAll(SvgPath.parse("M12 2v2"));
+				shapes.addAll(SvgPath.parse("M12 20v2"));
+				shapes.addAll(SvgPath.parse("m4.93 4.93 1.41 1.41"));
+				shapes.addAll(SvgPath.parse("m17.66 17.66 1.41 1.41"));
+				shapes.addAll(SvgPath.parse("M2 12h2"));
+				shapes.addAll(SvgPath.parse("M20 12h2"));
+				shapes.addAll(SvgPath.parse("m6.34 17.66-1.41 1.41"));
+				shapes.addAll(SvgPath.parse("m19.07 4.93-1.41 1.41"));
+			}
+			case COMPASS -> {
+				shapes.add(SvgPath.circle(12, 12, 10));
+				shapes.addAll(SvgPath.parse(
+						"m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z"));
+			}
+			case PACKAGE -> {
+				shapes.addAll(SvgPath.parse(
+						"M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4"
+								+ "A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"));
+				shapes.addAll(SvgPath.parse("M12 22V12"));
+				shapes.addAll(SvgPath.parse("m7.5 4.27 9 5.15"));
+			}
+			case ACTIVITY -> shapes.addAll(SvgPath.parse(
+					"M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0"
+							+ "l-2.35 8.36A2 2 0 0 1 4.49 12H2"));
+			case WIFI -> {
+				shapes.addAll(SvgPath.parse("M12 20h.01"));
+				shapes.addAll(SvgPath.parse("M2 8.82a15 15 0 0 1 20 0"));
+				shapes.addAll(SvgPath.parse("M5 12.859a10 10 0 0 1 14 0"));
+				shapes.addAll(SvgPath.parse("M8.5 16.429a5 5 0 0 1 7 0"));
+			}
+			case SERVER -> {
+				shapes.add(SvgPath.rect(2, 2, 20, 8, 2));
+				shapes.add(SvgPath.rect(2, 14, 20, 8, 2));
+				shapes.addAll(SvgPath.parse("M6 6h.01"));
+				shapes.addAll(SvgPath.parse("M6 18h.01"));
+			}
+			case SETTINGS -> {
+				shapes.addAll(SvgPath.parse(
+						"M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"));
+				shapes.add(SvgPath.circle(12, 12, 3));
 			}
 			case DICE -> {
 				shapes.add(SvgPath.rect(2, 10, 12, 12, 2));

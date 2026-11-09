@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.ohmyf3.font.CoverageBitmap;
+import com.ohmyf3.font.EntryClassifier;
 import com.ohmyf3.font.GlyphOutline;
 import com.ohmyf3.font.GlyphRasterizer;
 import com.ohmyf3.font.IconPainter;
@@ -57,6 +58,13 @@ public final class TtfTextRenderer {
 
 	private static final int CARD_FILL = 0xC8141418;
 	private static final int CARD_BORDER = 0x2AFFFFFF;
+	private static final int CARD_BORDER_MODS = 0x4AFFB74D;
+
+	/** Gap between the key column and the value column. */
+	private static final int KEY_GAP = 6;
+
+	/** Dimmer colour for the {@code key} part of a row. */
+	private static final int KEY_COLOR = 0xFF9AA0A6;
 
 	private static final int DEFAULT_COLOR = 0xFFE0E0E0;
 	private static final int FORMATTING_CODE = '\u00a7';
@@ -91,6 +99,7 @@ public final class TtfTextRenderer {
 
 	private static GlyphAtlas.Rect cardFill;
 	private static GlyphAtlas.Rect cardBorder;
+	private static GlyphAtlas.Rect cardBorderMods;
 
 	private TtfTextRenderer() {
 	}
@@ -101,9 +110,10 @@ public final class TtfTextRenderer {
 	private record Cell(Sprite sprite, float advance) {
 	}
 
-	/** One debug line: an optional leading icon plus its glyphs. */
-	private record Row(IconPainter.Icon icon, List<Cell> cells) {
-		static final Row EMPTY = new Row(null, List.of());
+	/** One debug row: icon, dim key, bright value. */
+	private record Row(IconPainter.Icon icon, List<Cell> keyCells, List<Cell> valueCells, boolean vanilla,
+			boolean header) {
+		static final Row EMPTY = new Row(null, List.of(), List.of(), true, false);
 	}
 
 	private record GlyphKey(int codePoint, int color) {
@@ -158,58 +168,119 @@ public final class TtfTextRenderer {
 
 	private static void drawColumn(GuiGraphicsExtractor graphics, List<Row> rows, boolean alignLeft,
 			int screenWidth) {
-		int widest = 0;
+		List<Card> cards = new ArrayList<>();
+		List<Row> current = new ArrayList<>();
 
+		// Vanilla rows keep their blank-line grouping; mod rows are collected into one card.
 		for (Row row : rows) {
-			widest = Math.max(widest, widthOf(row.cells()));
-		}
-
-		if (widest == 0) {
-			return;
-		}
-
-		int cardWidth = CARD_PADDING * 2 + GUTTER + widest;
-		int x = alignLeft ? 2 : screenWidth - 2 - cardWidth;
-		int y = 2;
-
-		for (int index = 0; index < rows.size(); ) {
-			if (!hasContent(rows.get(index))) {
-				index++;
+			if (!row.vanilla()) {
 				continue;
 			}
 
-			int start = index;
+			if (!hasContent(row)) {
+				if (!current.isEmpty()) {
+					cards.add(new Card(current, false));
+					current = new ArrayList<>();
+				}
 
-			while (index < rows.size() && hasContent(rows.get(index))) {
-				index++;
+				continue;
 			}
 
-			int count = index - start;
-			int cardHeight = CARD_PADDING * 2 + count * lineHeight;
+			current.add(row);
+		}
 
-			drawCard(graphics, x, y, cardWidth, cardHeight);
+		if (!current.isEmpty()) {
+			cards.add(new Card(current, false));
+		}
 
-			for (int row = 0; row < count; row++) {
-				drawRow(graphics, rows.get(start + row), x, y + CARD_PADDING + row * lineHeight);
+		List<Row> mods = new ArrayList<>();
+
+		for (Row row : rows) {
+			if (!row.vanilla() && hasContent(row)) {
+				mods.add(row);
+			}
+		}
+
+		if (!mods.isEmpty()) {
+			// A labelled card so third-party rows are clearly their own area.
+			Row header = new Row(null, List.of(), cellsFor("Mods", KEY_COLOR), false, true);
+			List<Row> withHeader = new ArrayList<>();
+			withHeader.add(header);
+			withHeader.addAll(mods);
+			cards.add(new Card(withHeader, true));
+		}
+
+		if (cards.isEmpty()) {
+			return;
+		}
+
+		int widest = 0;
+
+		for (Card card : cards) {
+			widest = Math.max(widest, cardWidth(card));
+		}
+
+		int cardWidth = widest;
+		int x = alignLeft ? 2 : screenWidth - 2 - cardWidth;
+		int y = 2;
+
+		for (Card card : cards) {
+			int height = CARD_PADDING * 2 + card.rows().size() * lineHeight;
+			drawCard(graphics, x, y, cardWidth, height, card.mods());
+
+			int maxKey = maxKeyWidth(card);
+			int valueColumn = x + CARD_PADDING + GUTTER + (maxKey > 0 ? maxKey + KEY_GAP : 0);
+
+			for (int index = 0; index < card.rows().size(); index++) {
+				drawRow(graphics, card.rows().get(index), x, y + CARD_PADDING + index * lineHeight, valueColumn);
 			}
 
-			y += cardHeight + CARD_GAP;
+			y += height + CARD_GAP;
 		}
 	}
 
-	private static boolean hasContent(Row row) {
-		return row.icon() != null || !row.cells().isEmpty();
+	private record Card(List<Row> rows, boolean mods) {
 	}
 
-	private static void drawCard(GuiGraphicsExtractor graphics, int x, int y, int width, int height) {
+	private static int cardWidth(Card card) {
+		int maxKey = maxKeyWidth(card);
+		int maxRow = 0;
+
+		for (Row row : card.rows()) {
+			int key = widthOf(row.keyCells());
+			int value = widthOf(row.valueCells());
+			maxRow = Math.max(maxRow, key + (key > 0 ? KEY_GAP : 0) + value);
+		}
+
+		return CARD_PADDING * 2 + GUTTER + maxRow;
+	}
+
+	private static int maxKeyWidth(Card card) {
+		int maxKey = 0;
+
+		for (Row row : card.rows()) {
+			maxKey = Math.max(maxKey, widthOf(row.keyCells()));
+		}
+
+		return maxKey;
+	}
+
+	private static boolean hasContent(Row row) {
+		return row.icon() != null || !row.keyCells().isEmpty() || !row.valueCells().isEmpty();
+	}
+
+	private static void drawCard(GuiGraphicsExtractor graphics, int x, int y, int width, int height,
+			boolean mods) {
 		if (cardFill == null) {
 			return;
 		}
 
 		blitNineSlice(graphics, cardFill, x, y, width, height);
 
-		if (cardBorder != null) {
-			blitNineSlice(graphics, cardBorder, x, y, width, height);
+		GlyphAtlas.Rect border = mods && cardBorderMods != null ? cardBorderMods : cardBorder;
+
+		if (border != null) {
+			blitNineSlice(graphics, border, x, y, width, height);
 		}
 	}
 
@@ -260,7 +331,14 @@ public final class TtfTextRenderer {
 		graphics.blit(textureView, sampler, dx0, dy0, dx1, dy1, u0, u1, v0, v1);
 	}
 
-	private static void drawRow(GuiGraphicsExtractor graphics, Row row, int cardX, int rowY) {
+	private static void drawRow(GuiGraphicsExtractor graphics, Row row, int cardX, int rowY, int valueColumn) {
+		int baseline = rowY + ascent;
+
+		if (row.header()) {
+			drawCells(graphics, row.valueCells(), cardX + CARD_PADDING, baseline);
+			return;
+		}
+
 		if (row.icon() != null) {
 			Sprite icon = icon(row.icon(), iconColor(row.icon()));
 
@@ -271,10 +349,17 @@ public final class TtfTextRenderer {
 			}
 		}
 
-		int baseline = rowY + ascent;
 		float penX = cardX + CARD_PADDING + GUTTER;
+		penX = drawCells(graphics, row.keyCells(), penX, baseline);
 
-		for (Cell cell : row.cells()) {
+		if (!row.valueCells().isEmpty()) {
+			drawCells(graphics, row.valueCells(), Math.max(penX, valueColumn), baseline);
+		}
+	}
+
+	/** Draws a run of glyphs without any decoration and returns the pen position after it. */
+	private static float drawCells(GuiGraphicsExtractor graphics, List<Cell> cells, float penX, int baseline) {
+		for (Cell cell : cells) {
 			Sprite sprite = cell.sprite();
 
 			if (sprite.rect() != null) {
@@ -282,7 +367,6 @@ public final class TtfTextRenderer {
 				int x0 = Math.round(targetX);
 				float remainder = targetX - x0;
 				int y0 = baseline + sprite.top();
-
 				boolean shifted = Math.abs(remainder) > 0.001F;
 
 				if (shifted) {
@@ -300,6 +384,8 @@ public final class TtfTextRenderer {
 
 			penX += cell.advance();
 		}
+
+		return penX;
 	}
 
 	/** Icons get their own accent colour so they read as a group at a glance. */
@@ -314,6 +400,16 @@ public final class TtfTextRenderer {
 			case CHIP -> 0xFFB9A6E8;
 			case CUP -> 0xFFD8A87A;
 			case DICE -> 0xFFE6CC7A;
+			case LEAF -> 0xFF9CD67A;
+			case CLOCK -> 0xFF7FC7D9;
+			case SUN -> 0xFFE8D06A;
+			case COMPASS -> 0xFF6FC7B8;
+			case PACKAGE -> 0xFFE0A070;
+			case ACTIVITY -> 0xFFE08AB0;
+			case WIFI -> 0xFF7FB8E8;
+			case SERVER -> 0xFFA0B0C8;
+			case SETTINGS -> 0xFFAAB4BF;
+			case DOT -> 0xFF8A9099;
 		};
 	}
 
@@ -330,30 +426,35 @@ public final class TtfTextRenderer {
 	// ---------------------------------------------------------------- layout
 
 	private static Row layout(String line) {
-		List<Cell> cells = new ArrayList<>(line.length());
-		IconPainter.Icon rowIcon = null;
-		int color = DEFAULT_COLOR;
+		EntryClassifier.Entry entry = EntryClassifier.classify(line);
 
-		for (int i = 0; i < line.length(); ) {
-			char c = line.charAt(i);
+		List<Cell> keyCells = entry.key().isEmpty() ? List.of() : cellsFor(entry.key(), KEY_COLOR);
+		List<Cell> valueCells = cellsFor(entry.value(), DEFAULT_COLOR);
 
-			if (c == FORMATTING_CODE && i + 1 < line.length()) {
-				color = colorFor(line.charAt(i + 1), color);
+		return new Row(entry.icon(), keyCells, valueCells, entry.vanilla(), false);
+	}
+
+	/** Splits text into glyph cells, honouring {@code §} colour codes. */
+	private static List<Cell> cellsFor(String text, int baseColor) {
+		List<Cell> cells = new ArrayList<>(text.length());
+		int color = baseColor;
+
+		for (int i = 0; i < text.length(); ) {
+			char c = text.charAt(i);
+
+			if (c == FORMATTING_CODE && i + 1 < text.length()) {
+				color = colorFor(text.charAt(i + 1), baseColor);
 				i += 2;
 				continue;
 			}
 
-			if (rowIcon == null) {
-				rowIcon = KeywordIcons.iconStartingAt(line, i);
-			}
-
-			int codePoint = line.codePointAt(i);
+			int codePoint = text.codePointAt(i);
 			i += Character.charCount(codePoint);
 			Sprite sprite = glyph(codePoint, color);
 			cells.add(new Cell(sprite, sprite.advance()));
 		}
 
-		return new Row(rowIcon, cells);
+		return cells;
 	}
 
 	private static int colorFor(char code, int current) {
@@ -465,6 +566,7 @@ public final class TtfTextRenderer {
 
 		cardFill = atlas.add(roundedRect(size, radius, 0), CARD_FILL);
 		cardBorder = atlas.add(roundedRect(size, radius, Math.max(1, deviceScale / 2.0F)), CARD_BORDER);
+		cardBorderMods = atlas.add(roundedRect(size, radius, Math.max(1, deviceScale / 2.0F)), CARD_BORDER_MODS);
 	}
 
 	/**

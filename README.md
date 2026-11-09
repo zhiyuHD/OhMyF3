@@ -100,14 +100,23 @@ Two bugs worth remembering, both caught by checking output rather than trusting 
 
 ## Debug screen layout
 
-Vanilla hands us two flat columns of strings. They are redrawn as grouped cards:
+The content itself is rebuilt around icons rather than decorated with them:
 
-- blank lines are group separators, and each group becomes a **rounded card**
-  (nine-slice texture generated in code: fill `0xC8141418`, 1px border, 3px radius);
-- every row has a fixed **icon gutter** on the left, so text always starts at the same x no
-  matter which rows happen to have an icon;
-- cards in a column share one width, so the right column lines up edge to edge;
-- icons are tinted per kind (gauge green, memory amber, chip violet, ...) to read at a glance.
+- every line is classified into an **icon + key + value** entry
+  (`EntryClassifier`); the key is drawn dim, the value bright;
+- values form a real column: each card aligns them at the widest key, so the numbers line up;
+- blank lines still separate groups, and each group is a **rounded card** (nine-slice texture
+  generated in code: fill `0xC8141418`, 1px border, 3px radius);
+- every row has a fixed **icon gutter**, tinted per category;
+- rows that are not vanilla fields go into a separate **Mods card** at the end of the column,
+  with an amber border and a `Mods` header.
+
+Category detection is a whitelist of the field names vanilla 26.3 prints (`XYZ`, `Block`,
+`Chunk`, `Facing`, `Mem`, `Pools`, `Chunk Builder`, `Tasks`, `Duration`, `Java`, `CPU`,
+`OpenGL`, ...); anything else is treated as mod content. This is heuristic: a mod that prints
+`Mem: ...` would be classified as vanilla. Tagging by owning entry would mean hooking the
+`DebugScreenDisplayer` inside `DebugScreenOverlay`, which is a much larger change than this
+mod needs right now.
 
 ## Keyword icons
 
