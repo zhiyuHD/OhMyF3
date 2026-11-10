@@ -3,6 +3,7 @@ package com.ohmyf3.client;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import com.ohmyf3.client.font.TtfTextRenderer;
@@ -18,6 +19,7 @@ import net.minecraft.client.gui.components.debug.DebugScreenEntry;
 import net.minecraft.client.gui.components.debug.DebugScreenEntryList;
 import net.minecraft.client.gui.components.debug.DebugScreenEntryStatus;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
@@ -44,6 +46,9 @@ public final class M3DebugOptionsScreen extends Screen {
 	}
 
 	private final List<Entry> entries = new ArrayList<>();
+	private final List<Entry> filtered = new ArrayList<>();
+	private String query = "";
+	private boolean searchFocused;
 	private final List<Button> buttons = new ArrayList<>();
 
 	private int scroll;
@@ -66,6 +71,22 @@ public final class M3DebugOptionsScreen extends Screen {
 
 		entries.sort(Comparator.comparing((Entry e) -> e.category().sortKey())
 				.thenComparing(e -> e.id().toString()));
+		rebuildFiltered();
+	}
+
+	/** Re-applies the search filter; the list always renders {@link #filtered}. */
+	private void rebuildFiltered() {
+		String needle = query.trim().toLowerCase(Locale.ROOT);
+		filtered.clear();
+
+		for (Entry entry : entries) {
+			if (needle.isEmpty() || entry.id().toString().toLowerCase(Locale.ROOT).contains(needle)
+					|| entry.category().label().getString().toLowerCase(Locale.ROOT).contains(needle)) {
+				filtered.add(entry);
+			}
+		}
+
+		scroll = 0;
 	}
 
 	// ---------------------------------------------------------------- geometry
@@ -82,8 +103,9 @@ public final class M3DebugOptionsScreen extends Screen {
 		return this.height / 2 - panelHeight() / 2;
 	}
 
+	/** First row starts below the search field, which sits under the subtitle. */
 	private int listTop() {
-		return panelY() + PADDING + HEADER_HEIGHT + 8;
+		return panelY() + PADDING + 60;
 	}
 
 	private int listBottom() {
@@ -95,7 +117,7 @@ public final class M3DebugOptionsScreen extends Screen {
 	}
 
 	private int maxScroll() {
-		return Math.max(0, entries.size() - visibleRows());
+		return Math.max(0, filtered.size() - visibleRows());
 	}
 
 	// ---------------------------------------------------------------- drawing
@@ -112,11 +134,57 @@ public final class M3DebugOptionsScreen extends Screen {
 
 		TtfTextRenderer.drawString(graphics, "F3 显示项", x + PADDING, y + PADDING + 10, M3.ON_SURFACE);
 		TtfTextRenderer.drawString(graphics,
-				"关掉的条目不会出现在 F3 里 · 共 " + entries.size() + " 项",
+				"关掉的条目不会出现在 F3 里 · " + filtered.size() + "/" + entries.size() + " 项",
 				x + PADDING, y + PADDING + 24, M3.ON_SURFACE_VARIANT_BRIGHT);
 
+		renderSearch(graphics, mouseX, mouseY);
 		renderList(graphics, mouseX, mouseY);
 		renderFooter(graphics, mouseX, mouseY);
+	}
+
+	private int searchX() {
+		return panelX() + PADDING;
+	}
+
+	private int searchY() {
+		return panelY() + PADDING + 32;
+	}
+
+	private int searchWidth() {
+		return PANEL_WIDTH - PADDING * 2 - 96;
+	}
+
+	private int[] profileChip() {
+		return new int[] {panelX() + PANEL_WIDTH - PADDING - 92, searchY(), 92, 24};
+	}
+
+	private void renderSearch(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		int x = searchX();
+		int y = searchY();
+		int width = searchWidth();
+		boolean hovered = M3.inside(mouseX, mouseY, x, y, width, 24);
+		Shapes.outlined(graphics, x, y, width, 24, 12,
+				searchFocused ? M3.SURFACE_CONTAINER_HIGHEST : M3.SURFACE_CONTAINER,
+				searchFocused ? M3.PRIMARY : M3.OUTLINE_VARIANT);
+
+		String text = query.isEmpty() ? "搜索条目…" : query;
+		int color = query.isEmpty() ? M3.OUTLINE : M3.ON_SURFACE;
+		TtfTextRenderer.drawString(graphics, text, x + 12, y + 16, color);
+
+		if (searchFocused && !query.isEmpty() && (System.currentTimeMillis() / 500) % 2 == 0) {
+			int caretX = x + 12 + TtfTextRenderer.stringWidth(query);
+			graphics.fill(caretX + 1, y + 5, caretX + 2, y + 19, M3.PRIMARY);
+		}
+
+		int[] chip = profileChip();
+		boolean chipHovered = M3.inside(mouseX, mouseY, chip[0], chip[1], chip[2], chip[3]);
+		boolean performance = Minecraft.getInstance().debugEntries
+				.isUsingProfile(net.minecraft.client.gui.components.debug.DebugScreenProfile.PERFORMANCE);
+		Shapes.filled(graphics, chip[0], chip[1], chip[2], chip[3], 12,
+				performance ? M3.PRIMARY_CONTAINER : chipHovered ? M3.SURFACE_CONTAINER_HIGHEST : M3.SURFACE_CONTAINER);
+		int labelWidth = TtfTextRenderer.stringWidth("性能档");
+		TtfTextRenderer.drawString(graphics, "性能档", chip[0] + (chip[2] - labelWidth) / 2.0F, chip[1] + 16,
+				performance ? M3.ON_PRIMARY_CONTAINER : M3.ON_SURFACE_VARIANT_BRIGHT);
 	}
 
 	private void renderList(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
@@ -130,8 +198,8 @@ public final class M3DebugOptionsScreen extends Screen {
 
 		DebugEntryCategory lastCategory = null;
 
-		for (int i = scroll; i < entries.size() && rowY < limit; i++) {
-			Entry entry = entries.get(i);
+		for (int i = scroll; i < filtered.size() && rowY < limit; i++) {
+			Entry entry = filtered.get(i);
 
 			if (lastCategory == null || !lastCategory.equals(entry.category())) {
 				lastCategory = entry.category();
@@ -157,7 +225,7 @@ public final class M3DebugOptionsScreen extends Screen {
 
 		if (maxScroll() > 0) {
 			int trackHeight = limit - listTop();
-			int thumbHeight = Math.max(18, trackHeight * visibleRows() / entries.size());
+			int thumbHeight = Math.max(18, trackHeight * visibleRows() / Math.max(1, filtered.size()));
 			int thumbY = listTop() + (trackHeight - thumbHeight) * scroll / maxScroll();
 			Shapes.filled(graphics, x + width - 4, thumbY, 3, thumbHeight, 2, M3.OUTLINE_VARIANT);
 		}
@@ -254,6 +322,22 @@ public final class M3DebugOptionsScreen extends Screen {
 			return super.mouseClicked(event, quickMove);
 		}
 
+		if (M3.inside(mouseX, mouseY, searchX(), searchY(), searchWidth(), 24)) {
+			searchFocused = true;
+			return true;
+		}
+
+		int[] chip = profileChip();
+
+		if (M3.inside(mouseX, mouseY, chip[0], chip[1], chip[2], chip[3])) {
+			DebugScreenEntryList statuses = Minecraft.getInstance().debugEntries;
+			statuses.loadProfile(net.minecraft.client.gui.components.debug.DebugScreenProfile.PERFORMANCE);
+			apply(statuses);
+			return true;
+		}
+
+		searchFocused = false;
+
 		for (Button button : buttons) {
 			if (M3.inside(mouseX, mouseY, button.x(), button.y(), button.width(), button.height())) {
 				M3.ripple("btn:" + button.key(), mouseX, mouseY);
@@ -290,8 +374,8 @@ public final class M3DebugOptionsScreen extends Screen {
 		DebugEntryCategory lastCategory = null;
 		int rowY = listTop();
 
-		for (int i = scroll; i < entries.size(); i++) {
-			Entry current = entries.get(i);
+		for (int i = scroll; i < filtered.size(); i++) {
+			Entry current = filtered.get(i);
 
 			if (lastCategory == null || !lastCategory.equals(current.category())) {
 				lastCategory = current.category();
@@ -315,8 +399,8 @@ public final class M3DebugOptionsScreen extends Screen {
 		int rowY = listTop();
 		DebugEntryCategory lastCategory = null;
 
-		for (int i = scroll; i < entries.size(); i++) {
-			Entry entry = entries.get(i);
+		for (int i = scroll; i < filtered.size(); i++) {
+			Entry entry = filtered.get(i);
 
 			if (lastCategory == null || !lastCategory.equals(entry.category())) {
 				lastCategory = entry.category();
@@ -388,9 +472,44 @@ public final class M3DebugOptionsScreen extends Screen {
 	}
 
 	@Override
+	public boolean charTyped(CharacterEvent event) {
+		if (!searchFocused) {
+			return super.charTyped(event);
+		}
+
+		String typed = event.codepointAsString();
+
+		if (typed.isEmpty() || !typed.chars().allMatch(c -> Character.isLetterOrDigit(c) || c == '_' || c == ':')) {
+			return false;
+		}
+
+		query += typed;
+		rebuildFiltered();
+		return true;
+	}
+
+	@Override
 	public boolean keyPressed(KeyEvent event) {
-		if (event.input() == 256) {
+		int key = event.input();
+
+		if (key == 256) {
+			if (searchFocused && !query.isEmpty()) {
+				query = "";
+				rebuildFiltered();
+				return true;
+			}
+
 			close();
+			return true;
+		}
+
+		if (searchFocused && (key == 259 || key == 261)) {
+			// Backspace / Delete: drop the last character.
+			if (!query.isEmpty()) {
+				query = query.substring(0, query.offsetByCodePoints(query.length(), -1));
+				rebuildFiltered();
+			}
+
 			return true;
 		}
 
