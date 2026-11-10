@@ -1134,11 +1134,14 @@ public final class TtfTextRenderer {
 			return;
 		}
 
-		// The previous scale's texture is still assigned; rebuilding must not adopt it, or the two
-		// snapshots would share one texture and overwrite each other.
+		// The previous scale's texture and caches are still assigned; rebuilding must not adopt them,
+		// or the two snapshots would share one texture/map and overwrite each other (clearing the old
+		// map in place and reusing it is what garbled both scales after cycling the zoom).
 		texture = null;
 		textureView = null;
 		sampler = null;
+		GLYPHS = new HashMap<>();
+		ICONS = new HashMap<>();
 
 		rebuildAtlas(scale);
 		ATLASES.put(scale, new Snapshot(scale, atlas, texture, textureView, sampler, fontScale, GLYPHS, ICONS,
