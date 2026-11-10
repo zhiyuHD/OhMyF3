@@ -113,6 +113,9 @@ public final class TtfTextRenderer {
 
 	/** Last drawn columns, replayed while the overlay slides out. */
 	/** Raw lines the overlay last drew, reused by the settings screen's layout editor. */
+	private static boolean capturePending;
+	private static boolean capturing;
+
 	private static List<String> lastLeftLines = List.of();
 	private static List<String> lastRightLines = List.of();
 
@@ -213,9 +216,21 @@ public final class TtfTextRenderer {
 	}
 
 	/** Called once per frame, before the overlay assembles its columns. */
+	/**
+	 * Asks the next overlay extraction to only record its rows, without drawing them.
+	 *
+	 * <p>The layout editor calls this before running the overlay itself: that is what lets it show
+	 * live F3 content without the player having to open F3 first, and without double-drawing.
+	 */
+	public static void requestCapture() {
+		capturePending = true;
+	}
+
 	public static void beginFrame() {
-		// The backdrop texture is refreshed by BackdropBlur at GUI-render time; nothing to
-		// reset here yet, but the hook keeps the frame boundaries explicit.
+		// A capture requested since the last frame turns this whole extraction into a read-only
+		// pass: the rows are recorded, nothing is drawn.
+		capturing = capturePending;
+		capturePending = false;
 	}
 
 	public static void drawLines(GuiGraphicsExtractor graphics, List<String> lines, boolean alignLeft,
@@ -245,6 +260,10 @@ public final class TtfTextRenderer {
 			rebuildAtlas(target);
 			LOGGER.info("device scale {} (window guiScale {}, pose scale {})", target,
 					Minecraft.getInstance().getWindow().getGuiScale(), poseScale);
+		}
+
+		if (capturing) {
+			return;
 		}
 
 		// Layout first: this rasterises anything not yet cached, so one upload covers the

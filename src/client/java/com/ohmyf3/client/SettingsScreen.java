@@ -227,6 +227,18 @@ public final class SettingsScreen extends Screen {
 	private void renderLayoutEditor(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
 		graphics.fill(0, 0, this.width, this.height, 0x8C000000);
 
+		// Run the real overlay in capture mode: it records the current rows (so the dummy shows live
+		// values, FPS included) and draws nothing, because TtfTextRenderer skips rendering while
+		// capturing.
+		TtfTextRenderer.requestCapture();
+
+		try {
+			Minecraft.getInstance().getDebugOverlay().extractRenderState(graphics);
+		} catch (Throwable throwable) {
+			// The dummy overlay must never take the settings screen down with it.
+			com.ohmyf3.OhMyF3.LOGGER.warn("F3 capture failed; falling back to sample rows", throwable);
+		}
+
 		List<Target> targets = targets(graphics);
 		lastTargets = targets;
 
