@@ -34,8 +34,10 @@ public abstract class HudMixin {
 
 	@Inject(method = "extractDebugOverlay", at = @At("HEAD"))
 	private void ohmyf3$sampleSlideClock(GuiGraphicsExtractor extractor, CallbackInfo ci) {
-		// showDebugScreen() is the same visibility check the overlay itself uses.
-		boolean visible = this.debugOverlay.showDebugScreen();
+		// showDebugScreen() also returns true when an always-on entry keeps the overlay alive, which
+		// would freeze the animation at "fully open". The animation must follow the actual F3 toggle
+		// so always-on rows stay put while the rest slides in.
+		boolean visible = net.minecraft.client.Minecraft.getInstance().debugEntries.isOverlayVisible();
 		long now = System.nanoTime();
 
 		DebugOverlaySlide.update(visible, now);

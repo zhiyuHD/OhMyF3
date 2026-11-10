@@ -341,7 +341,7 @@ public final class TtfTextRenderer {
 				drawColumn(graphics, animated, alignLeft, screenWidth, slideOffset, 2 + used + CARD_GAP);
 			}
 		} else {
-			drawColumn(graphics, rows, alignLeft, screenWidth, 0.0F, 2);
+			drawColumn(graphics, rows, alignLeft, screenWidth, slideOffset, 2);
 		}
 	}
 
