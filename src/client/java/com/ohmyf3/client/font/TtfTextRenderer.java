@@ -148,8 +148,15 @@ public final class TtfTextRenderer {
 	private static final java.util.Set<Row> PINNED_ROWS = java.util.Collections
 			.newSetFromMap(new java.util.IdentityHashMap<>());
 
-	private static final java.util.Map<String, Integer> SLOT_LEFT = new java.util.HashMap<>();
-	private static final java.util.Map<String, Integer> SLOT_RIGHT = new java.util.HashMap<>();
+	/**
+	 * Where a row sat in the last complete layout: {@code {cardX, rowY, cardWidth, valueColumnX}}.
+	 *
+	 * <p>Remembering all four is what makes the carved row pixel-identical: the right column's x
+	 * depends on the widest card, and the row's baseline depends on the card's padding, so neither
+	 * can be recomputed from a single row.
+	 */
+	private static final java.util.Map<String, int[]> SLOT_LEFT = new java.util.HashMap<>();
+	private static final java.util.Map<String, int[]> SLOT_RIGHT = new java.util.HashMap<>();
 
 	private static int lastLeftCardWidth;
 	private static int lastRightCardWidth;
@@ -357,18 +364,25 @@ public final class TtfTextRenderer {
 			// Closed: the game only hands us the always-on rows, so the full layout cannot be rebuilt
 			// from this frame. Draw them where they sat in the last complete layout — that is the slot
 			// the F3-only rows will glide into, and it is why the row does not move when they arrive.
-			java.util.Map<String, Integer> slots = alignLeft ? SLOT_LEFT : SLOT_RIGHT;
+			java.util.Map<String, int[]> slots = alignLeft ? SLOT_LEFT : SLOT_RIGHT;
 
 			for (String line : lines) {
 				if (!pinnedToOverlay(line)) {
 					continue;
 				}
 
-				List<String> single = List.of(line);
-				int width = previewWidth(single);
-				int x = columnAnchorX(graphics, alignLeft, width, screenWidth);
-				int y = slots.getOrDefault(slotKey(line), 2);
-				drawPreview(graphics, single, x, y);
+				int[] slot = slots.get(slotKey(line));
+
+				if (slot == null) {
+					// Never seen a complete layout: fall back to the column anchor.
+					int width = previewWidth(List.of(line));
+					drawPreview(graphics, List.of(line), columnAnchorX(graphics, alignLeft, width, screenWidth), 2);
+					continue;
+				}
+
+				Row row = layout(line);
+				drawCard(graphics, slot[0], slot[1] - CARD_PADDING, slot[2], CARD_PADDING * 2 + lineHeight, false);
+				drawRow(graphics, row, slot[0], slot[1], slot[3]);
 			}
 
 			return;
@@ -521,7 +535,8 @@ public final class TtfTextRenderer {
 				if (slide == 0.0F && row.raw() != null) {
 					// The complete layout: remember where each row lives so the always-on rows can be
 					// drawn at those exact slots while the overlay is closed.
-					(alignLeft ? SLOT_LEFT : SLOT_RIGHT).put(slotKey(row.raw()), rowY);
+					(alignLeft ? SLOT_LEFT : SLOT_RIGHT).put(slotKey(row.raw()),
+							new int[] {cardX, rowY, cardWidth, rowX + CARD_PADDING + gutter() + (maxKey > 0 ? maxKey + KEY_GAP : 0)});
 
 					if (pinnedToOverlay(row.raw())) {
 						PINNED_ROWS.add(row);
