@@ -5,6 +5,7 @@ import java.util.List;
 import com.ohmyf3.client.DebugEntryOrigin;
 import com.ohmyf3.client.DebugOverlaySlide;
 import com.ohmyf3.client.font.TtfTextRenderer;
+import com.ohmyf3.config.OhMyF3Config;
 
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.DebugScreenOverlay;
@@ -56,7 +57,20 @@ public abstract class DebugScreenOverlayMixin {
 		}
 
 		if (TtfTextRenderer.isReady()) {
-			TtfTextRenderer.drawLines(graphics, lines, alignLeft, scaledScreenWidth);
+			// User rows are appended to the left column so they read as part of the overlay.
+			List<String> content = alignLeft ? com.ohmyf3.custom.CustomFields.augment(lines) : lines;
+			float scale = Math.max(0.5F, Math.min(2.0F, OhMyF3Config.get().scale));
+
+			if (scale != 1.0F) {
+				// Scaling the pose keeps the font sharp: drawLines derives its rasterisation scale
+				// from the pose, so glyphs are baked at the zoomed size rather than stretched.
+				graphics.pose().pushMatrix();
+				graphics.pose().scale(scale, scale);
+				TtfTextRenderer.drawLines(graphics, content, alignLeft, Math.round(scaledScreenWidth / scale));
+				graphics.pose().popMatrix();
+			} else {
+				TtfTextRenderer.drawLines(graphics, content, alignLeft, scaledScreenWidth);
+			}
 
 			// Cancelling skips the RETURN hook, so the pose must be restored here.
 			if (pushed) {

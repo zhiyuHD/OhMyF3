@@ -39,6 +39,34 @@ public final class OhMyF3Config {
 	/** Slide the columns in when F3 opens. */
 	public boolean slideAnimation = true;
 
+	/** Overlay zoom, 0.5–2.0; the renderer rasterises the font at the resulting scale, so it stays sharp. */
+	public float scale = 1.0F;
+
+	/** User-defined rows (clock, position, computed values) shown under the mod card. */
+	public java.util.List<CustomField> customFields = new java.util.ArrayList<>();
+
+	/**
+	 * One user-defined F3 row.
+	 *
+	 * <p>{@code icon} names an {@code IconPainter.Icon}; {@code expression} is evaluated by
+	 * {@code com.ohmyf3.custom.Expression} (Java-like subset, no compiler needed at runtime).
+	 */
+	public static final class CustomField {
+		public String label = "自定义";
+		public String icon = "CLOCK";
+		public String expression = "time()";
+		public boolean enabled = true;
+
+		public CustomField() {
+		}
+
+		public CustomField(String label, String icon, String expression) {
+			this.label = label;
+			this.icon = icon;
+			this.expression = expression;
+		}
+	}
+
 	/**
 	 * Absolute positions for movable F3 elements, keyed by element id.
 	 *

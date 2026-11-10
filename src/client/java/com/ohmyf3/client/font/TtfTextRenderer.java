@@ -833,6 +833,27 @@ public final class TtfTextRenderer {
 		rebuildAtlas(scale);
 	}
 
+	/** Draws one icon glyph at {@code (x, top)}; used by the custom-item editor. */
+	public static void drawIcon(GuiGraphicsExtractor graphics, IconPainter.Icon icon, float x, float top) {
+		ensureInitialised();
+
+		if (!ready || icon == null) {
+			return;
+		}
+
+		Sprite sprite = icon(icon, DEFAULT_COLOR);
+		flushAtlas();
+
+		if (sprite.rect() == null) {
+			return;
+		}
+
+		int x0 = Math.round(x + sprite.left());
+		int y0 = Math.round(top + sprite.top());
+		blitRegion(graphics, sprite.rect(), 0, 0, sprite.rect().width(), sprite.rect().height(), x0, y0,
+				x0 + sprite.width(), y0 + sprite.height());
+	}
+
 	/**
 	 * The lines the overlay last drew for a column, or an empty list when F3 has not been open yet.
 	 *
@@ -919,6 +940,32 @@ public final class TtfTextRenderer {
 	// ---------------------------------------------------------------- layout
 
 	private static Row layout(String line) {
+		// Custom rows carry their icon in a marker prefix; they bypass classification entirely.
+		IconPainter.Icon forcedIcon = null;
+
+		if (line != null && !line.isEmpty() && line.charAt(0) == '\u0001') {
+			int end = line.indexOf('\u0001', 1);
+
+			if (end > 0) {
+				try {
+					forcedIcon = IconPainter.Icon.valueOf(line.substring(1, end));
+				} catch (IllegalArgumentException ignored) {
+					// Unknown icon name: fall back to no icon rather than dropping the row.
+				}
+
+				line = line.substring(end + 1);
+			}
+		}
+
+		if (forcedIcon != null) {
+			int split = line.indexOf(": ");
+			String key = split < 0 ? line : line.substring(0, split);
+			String value = split < 0 ? "" : line.substring(split + 2);
+			boolean showIcon = OhMyF3Config.get().icons;
+			return new Row(showIcon ? forcedIcon : null, cellsFor(key, KEY_COLOR), cellsFor(value, DEFAULT_COLOR),
+					false, false, line);
+		}
+
 		EntryClassifier.Entry entry = EntryClassifier.classify(line);
 		OhMyF3Config config = OhMyF3Config.get();
 

@@ -35,7 +35,7 @@ public final class SettingsScreen extends Screen {
 	private static final int PADDING = 24;
 	private static final int GAP = 12;
 	private static final int HEADER_HEIGHT = 34;
-	private static final int SECTION_HEIGHT = 12 + M3.ROW_HEIGHT * 2 + M3.ROW_GAP;
+	private static final int SECTION_HEIGHT = 12 + M3.ROW_HEIGHT * 3 + M3.ROW_GAP * 2;
 	private static final int FOOTER_HEIGHT = 32;
 
 	private static final String OPEN_ANIM = "screen:open";
@@ -191,21 +191,65 @@ public final class SettingsScreen extends Screen {
 			M3.drawRipple(graphics, "row:" + toggle.label(), rect[0], rect[1], rect[2], rect[3]);
 		}
 
+		renderScaleRow(graphics, mouseX, mouseY);
+
 		renderFooter(graphics, mouseX, mouseY, footerY());
 		graphics.pose().popMatrix();
+	}
+
+	/** Zoom row: [-] 1.00x [+], stepping by 0.05 within 0.5–2.0. */
+	private static final float SCALE_STEP = 0.05F;
+	private static final float SCALE_MIN = 0.5F;
+	private static final float SCALE_MAX = 2.0F;
+
+	private int[] scaleRowRect() {
+		return rowRect(effectsY(), 2);
+	}
+
+	private int[] scaleButtonRect(int index) {
+		int[] row = scaleRowRect();
+		return new int[] {row[0] + row[2] - 16 - 76 + index * 44, row[1] + (M3.ROW_HEIGHT - 24) / 2, 28, 24};
+	}
+
+	private void renderScaleRow(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		int[] rect = scaleRowRect();
+		boolean hovered = M3.inside(mouseX, mouseY, rect[0], rect[1], rect[2], rect[3]);
+		Shapes.filled(graphics, rect[0], rect[1], rect[2], M3.ROW_HEIGHT, M3.RADIUS_LARGE,
+				hovered ? M3.SURFACE_CONTAINER_HIGHEST : M3.SURFACE_CONTAINER_HIGH);
+
+		TtfTextRenderer.drawString(graphics, "缩放", rect[0] + 16, rect[1] + 17, M3.ON_SURFACE);
+		TtfTextRenderer.drawString(graphics, "整个 F3 界面的大小", rect[0] + 16, rect[1] + 30,
+				M3.ON_SURFACE_VARIANT_BRIGHT);
+
+		String value = String.format(java.util.Locale.ROOT, "%.2f×", OhMyF3Config.get().scale);
+		TtfTextRenderer.drawString(graphics, value, rect[0] + rect[2] - 16 - 76 + 28,
+				rect[1] + 28, M3.ON_SURFACE_VARIANT_BRIGHT);
+
+		for (int i = 0; i < 2; i++) {
+			int[] button = scaleButtonRect(i);
+			boolean buttonHovered = M3.inside(mouseX, mouseY, button[0], button[1], button[2], button[3]);
+			Shapes.filled(graphics, button[0], button[1], button[2], button[3], 12,
+					buttonHovered ? M3.SURFACE_CONTAINER_HIGHEST : M3.SURFACE_CONTAINER_HIGH);
+			TtfTextRenderer.drawString(graphics, i == 0 ? "-" : "+", button[0] + button[2] / 2.0F - 2,
+					button[1] + 17, M3.ON_SURFACE_VARIANT_BRIGHT);
+		}
 	}
 
 	private void renderFooter(GuiGraphicsExtractor graphics, int mouseX, int mouseY, int y) {
 		int height = FOOTER_HEIGHT;
 		int x = contentX();
-		int doneWidth = 84;
-		int modeWidth = 96;
-		int resetWidth = 84;
+		int doneWidth = 60;
+		int customWidth = 72;
+		int modeWidth = 78;
+		int resetWidth = 72;
+		int gap = 8;
 
 		buttons.clear();
 		buttons.add(new Button("done", "完成", x, y, doneWidth, height, true));
-		buttons.add(new Button("mode", "调整 F3 布局", x + doneWidth + 8, y, modeWidth, height, false));
-		buttons.add(new Button("reset", "恢复默认", x + doneWidth + modeWidth + 16, y, resetWidth, height, false));
+		buttons.add(new Button("custom", "自定义项", x + doneWidth + gap, y, customWidth, height, false));
+		buttons.add(new Button("mode", "调整布局", x + doneWidth + customWidth + gap * 2, y, modeWidth, height, false));
+		buttons.add(new Button("reset", "恢复默认", x + doneWidth + customWidth + modeWidth + gap * 3, y,
+				resetWidth, height, false));
 
 		for (Button button : buttons) {
 			boolean hovered = M3.inside(mouseX, mouseY, button.x(), button.y(), button.width(), button.height());
@@ -484,6 +528,18 @@ public final class SettingsScreen extends Screen {
 			return true;
 		}
 
+		for (int i = 0; i < 2; i++) {
+			int[] button = scaleButtonRect(i);
+
+			if (M3.inside(mouseX, mouseY, button[0], button[1], button[2], button[3])) {
+				OhMyF3Config config = OhMyF3Config.get();
+				config.scale = Math.max(SCALE_MIN, Math.min(SCALE_MAX,
+						Math.round((config.scale + (i == 0 ? -SCALE_STEP : SCALE_STEP)) * 100.0F) / 100.0F));
+				config.save();
+				return true;
+			}
+		}
+
 		for (int i = 0; i < TOGGLES.size(); i++) {
 			Toggle toggle = TOGGLES.get(i);
 			int[] rect = rowRect(i < 2 ? appearanceY() : effectsY(), i < 2 ? i : i - 2);
@@ -536,6 +592,7 @@ public final class SettingsScreen extends Screen {
 	private void onButton(String key) {
 		switch (key) {
 			case "done" -> close();
+			case "custom" -> Minecraft.getInstance().setScreenAndShow(new CustomFieldsScreen(this));
 			case "mode" -> layoutMode = !layoutMode;
 			case "reset" -> OhMyF3Config.get().resetLayout();
 			default -> {
