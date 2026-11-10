@@ -61,7 +61,27 @@ public final class M3DebugOptionsScreen extends Screen {
 	public M3DebugOptionsScreen() {
 		super(Component.literal("F3 显示项"));
 		load();
+		normaliseAlwaysOn();
 		com.ohmyf3.OhMyF3.LOGGER.info("M3 debug options opened ({} entries)", entries.size());
+	}
+
+	/** Folds any {@code ALWAYS_ON} entry back into the overlay so the animation keeps working. */
+	private void normaliseAlwaysOn() {
+		DebugScreenEntryList statuses = Minecraft.getInstance().debugEntries;
+		boolean changed = false;
+
+		for (Entry entry : entries) {
+			if (statuses.getStatus(entry.id()) == DebugScreenEntryStatus.ALWAYS_ON) {
+				statuses.setStatus(entry.id(), DebugScreenEntryStatus.IN_OVERLAY);
+				changed = true;
+			}
+		}
+
+		if (changed) {
+			statuses.rebuildCurrentList();
+			statuses.save();
+			com.ohmyf3.OhMyF3.LOGGER.info("F3 always-on entries folded back into the overlay");
+		}
 	}
 
 	private void load() {
@@ -233,11 +253,17 @@ public final class M3DebugOptionsScreen extends Screen {
 		}
 	}
 
-	/** Vanilla's three states, as Material 3 segmented chips. */
-	private static final DebugScreenEntryStatus[] STATES = {DebugScreenEntryStatus.ALWAYS_ON,
-			DebugScreenEntryStatus.IN_OVERLAY, DebugScreenEntryStatus.NEVER};
+	/**
+	 * The two states this mod offers.
+	 *
+	 * <p>{@code ALWAYS_ON} is deliberately absent: a row that keeps the overlay alive breaks the
+	 * slide animation and cannot be positioned like the rest, so the mod normalises those entries
+	 * back to {@code IN_OVERLAY} and only offers "shown with F3" or "never".
+	 */
+	private static final DebugScreenEntryStatus[] STATES = {DebugScreenEntryStatus.IN_OVERLAY,
+			DebugScreenEntryStatus.NEVER};
 
-	private static final String[] STATE_LABELS = {"常显", "F3", "关闭"};
+	private static final String[] STATE_LABELS = {"F3", "关闭"};
 
 	private static final int CHIP_WIDTH = 46;
 	private static final int CHIP_HEIGHT = 22;
