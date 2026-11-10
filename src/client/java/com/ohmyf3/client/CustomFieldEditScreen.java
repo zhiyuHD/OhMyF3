@@ -213,7 +213,6 @@ public final class CustomFieldEditScreen extends Screen {
 
 		if (M3.inside(mouseX, mouseY, fieldX(), labelY(), fieldWidth(), FIELD_HEIGHT)) {
 			begin(Editing.LABEL, field.label);
-			com.ohmyf3.OhMyF3.LOGGER.info("DIAG edit focus=LABEL buffer={}", buffer);
 			return true;
 		}
 
