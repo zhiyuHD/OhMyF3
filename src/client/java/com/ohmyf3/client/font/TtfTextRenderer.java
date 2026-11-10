@@ -139,6 +139,15 @@ public final class TtfTextRenderer {
 	private static int lastLeftWidth;
 	private static int lastRightWidth;
 	/** Remembered y slot of each row in the last fully-open layout, per column. */
+	/**
+	 * Rows that were always-on in the last complete layout.
+	 *
+	 * <p>Needed for the replay during the close animation: those Row objects come from a previous
+	 * frame, and the per-frame owner map has already been cleared, so the owner lookup cannot be used.
+	 */
+	private static final java.util.Set<Row> PINNED_ROWS = java.util.Collections
+			.newSetFromMap(new java.util.IdentityHashMap<>());
+
 	private static final java.util.Map<String, Integer> SLOT_LEFT = new java.util.HashMap<>();
 	private static final java.util.Map<String, Integer> SLOT_RIGHT = new java.util.HashMap<>();
 
@@ -365,7 +374,10 @@ public final class TtfTextRenderer {
 			return;
 		}
 
-		drawColumn(graphics, rows, alignLeft, screenWidth, slideOffset, 2);
+		// During the animation the complete layout is available: the pinned rows hold their slot
+		// (a hole that the arriving rows merge into) while everything else slides in around them.
+		drawColumn(graphics, rows, alignLeft, screenWidth, slideOffset, 2,
+				split ? alwaysOnSet(rows) : java.util.Set.of());
 	}
 
 	// ---------------------------------------------------------------- cards
@@ -483,6 +495,10 @@ public final class TtfTextRenderer {
 
 		float slide = xOffset;
 
+		if (slide == 0.0F) {
+			PINNED_ROWS.clear();
+		}
+
 		for (Card card : cards) {
 			int height = CARD_PADDING * 2 + card.rows().size() * lineHeight;
 			// A card that holds a pinned row stays put: the rows around it glide into the empty
@@ -506,6 +522,10 @@ public final class TtfTextRenderer {
 					// The complete layout: remember where each row lives so the always-on rows can be
 					// drawn at those exact slots while the overlay is closed.
 					(alignLeft ? SLOT_LEFT : SLOT_RIGHT).put(slotKey(row.raw()), rowY);
+
+					if (pinnedToOverlay(row.raw())) {
+						PINNED_ROWS.add(row);
+					}
 				}
 			}
 
@@ -564,7 +584,11 @@ public final class TtfTextRenderer {
 		java.util.Set<Row> pinned = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
 
 		for (Row row : rows) {
-			if (row != null && row.raw() != null && pinnedToOverlay(row.raw())) {
+			if (row == null) {
+				continue;
+			}
+
+			if (PINNED_ROWS.contains(row) || (row.raw() != null && pinnedToOverlay(row.raw()))) {
 				pinned.add(row);
 			}
 		}
