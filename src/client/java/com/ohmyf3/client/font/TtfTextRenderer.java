@@ -106,8 +106,23 @@ public final class TtfTextRenderer {
 	/** Screen pixels per GUI unit (does not need to be an integer). */
 	private static float guiToScreen = 1.0F;
 
-	private static final Map<GlyphKey, Sprite> GLYPHS = new HashMap<>();
-	private static final Map<IconKey, Sprite> ICONS = new HashMap<>();
+	private static Map<GlyphKey, Sprite> GLYPHS = new HashMap<>();
+	private static Map<IconKey, Sprite> ICONS = new HashMap<>();
+
+	/**
+	 * One baked atlas and its caches, per rasterisation scale.
+	 *
+	 * <p>The overlay draws at {@code guiScale * zoom} while screens draw at {@code guiScale}. With a
+	 * single global atlas each consumer rebuilt it back and forth every frame, and whichever ran
+	 * second drew with the other's glyph sizes. Keeping one snapshot per scale means each context
+	 * gets glyphs baked for exactly the scale it is drawn at.
+	 */
+	private record Snapshot(int scale, GlyphAtlas glyphs, DynamicTexture texture, GpuTextureView view,
+			GpuSampler sampler, float fontScale, Map<GlyphKey, Sprite> glyphCache, Map<IconKey, Sprite> iconCache,
+			GlyphAtlas.Rect cardFill, GlyphAtlas.Rect cardBorder, GlyphAtlas.Rect cardBorderMods) {
+	}
+
+	private static final Map<Integer, Snapshot> ATLASES = new HashMap<>();
 
 	private static List<String> lastModRows = List.of();
 
@@ -262,7 +277,7 @@ public final class TtfTextRenderer {
 		guiToScreen = Minecraft.getInstance().getWindow().getGuiScale() * poseScale;
 
 		if (target != deviceScale) {
-			rebuildAtlas(target);
+			useScale(target);
 			LOGGER.info("device scale {} (window guiScale {}, pose scale {})", target,
 					Minecraft.getInstance().getWindow().getGuiScale(), poseScale);
 		}
@@ -831,11 +846,11 @@ public final class TtfTextRenderer {
 	public static void ensureDeviceScale(int scale) {
 		ensureInitialised();
 
-		if (!ready || scale <= 0 || scale == deviceScale) {
+		if (!ready || scale <= 0) {
 			return;
 		}
 
-		rebuildAtlas(scale);
+		useScale(scale);
 	}
 
 	/** Draws one icon glyph at {@code (x, top)}; used by the custom-item editor. */
@@ -1091,6 +1106,46 @@ public final class TtfTextRenderer {
 
 	// ---------------------------------------------------------------- atlas
 
+	/** Switches to the atlas baked for {@code scale}, building it on first use. */
+	private static void useScale(int scale) {
+		if (scale <= 0 || (scale == deviceScale && atlas != null)) {
+			return;
+		}
+
+		if (deviceScale > 0 && atlas != null) {
+			ATLASES.put(deviceScale, new Snapshot(deviceScale, atlas, texture, textureView, sampler, fontScale,
+					GLYPHS, ICONS, cardFill, cardBorder, cardBorderMods));
+		}
+
+		Snapshot snapshot = ATLASES.get(scale);
+
+		if (snapshot != null) {
+			deviceScale = snapshot.scale();
+			atlas = snapshot.glyphs();
+			texture = snapshot.texture();
+			textureView = snapshot.view();
+			sampler = snapshot.sampler();
+			fontScale = snapshot.fontScale();
+			GLYPHS = snapshot.glyphCache();
+			ICONS = snapshot.iconCache();
+			cardFill = snapshot.cardFill();
+			cardBorder = snapshot.cardBorder();
+			cardBorderMods = snapshot.cardBorderMods();
+			return;
+		}
+
+		// The previous scale's texture is still assigned; rebuilding must not adopt it, or the two
+		// snapshots would share one texture and overwrite each other.
+		texture = null;
+		textureView = null;
+		sampler = null;
+
+		rebuildAtlas(scale);
+		ATLASES.put(scale, new Snapshot(scale, atlas, texture, textureView, sampler, fontScale, GLYPHS, ICONS,
+				cardFill, cardBorder, cardBorderMods));
+		LOGGER.info("atlas built for device scale {}", scale);
+	}
+
 	private static void rebuildAtlas(int newDeviceScale) {
 		deviceScale = newDeviceScale;
 		fontScale = PIXEL_SIZE * deviceScale / (float) font.unitsPerEm();
@@ -1102,8 +1157,9 @@ public final class TtfTextRenderer {
 		ICONS.clear();
 
 		if (texture == null) {
-			texture = new DynamicTexture(() -> "ohmyf3 system font atlas", image);
-			Minecraft.getInstance().getTextureManager().register(ATLAS_ID, texture);
+			texture = new DynamicTexture(() -> "ohmyf3 system font atlas " + newDeviceScale, image);
+			Minecraft.getInstance().getTextureManager()
+					.register(ATLAS_ID.withSuffix("_" + newDeviceScale), texture);
 			textureView = texture.getTextureView();
 			sampler = texture.getSampler();
 		} else {
