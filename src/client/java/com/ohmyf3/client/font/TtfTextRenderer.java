@@ -303,16 +303,9 @@ public final class TtfTextRenderer {
 		List<Row> rows = new ArrayList<>(lines.size());
 
 		boolean split = slideOffset != 0.0F && lines.stream().anyMatch(TtfTextRenderer::pinnedToOverlay);
-		List<Row> alwaysOn = new ArrayList<>();
-		List<Row> animated = new ArrayList<>();
 
 		for (String line : lines) {
-			Row row = line == null || line.isEmpty() ? Row.EMPTY : layout(line);
-			rows.add(row);
-
-			if (split) {
-				(pinnedToOverlay(line) ? alwaysOn : animated).add(row);
-			}
+			rows.add(line == null || line.isEmpty() ? Row.EMPTY : layout(line));
 		}
 
 		if (atlas.isDirty()) {
@@ -335,11 +328,8 @@ public final class TtfTextRenderer {
 		}
 
 		if (split) {
-			int used = drawColumn(graphics, alwaysOn, alignLeft, screenWidth, 0.0F, 2);
-
-			if (!animated.isEmpty()) {
-				drawColumn(graphics, animated, alignLeft, screenWidth, slideOffset, 2 + used + CARD_GAP);
-			}
+			// One pass over the full layout: pinned rows keep their slot, everything else slides.
+			drawColumn(graphics, rows, alignLeft, screenWidth, slideOffset, 2, alwaysOnSet(rows));
 		} else {
 			drawColumn(graphics, rows, alignLeft, screenWidth, slideOffset, 2);
 		}
@@ -349,6 +339,18 @@ public final class TtfTextRenderer {
 
 	private static int drawColumn(GuiGraphicsExtractor graphics, List<Row> rows, boolean alignLeft,
 			int screenWidth, float xOffset, int yStart) {
+		return drawColumn(graphics, rows, alignLeft, screenWidth, xOffset, yStart, java.util.Set.of());
+	}
+
+	/**
+	 * Draws a column, translating every row that is <em>not</em> in {@code pinned} by {@code
+	 * slideOffset}.
+	 *
+	 * <p>Always-on rows are pinned: they keep their slot in the full layout so the F3-only rows can
+	 * glide into the space around them instead of pushing them aside.
+	 */
+	private static int drawColumn(GuiGraphicsExtractor graphics, List<Row> rows, boolean alignLeft,
+			int screenWidth, float xOffset, int yStart, java.util.Set<Row> pinned) {
 		List<Card> cards = new ArrayList<>();
 		List<Row> current = new ArrayList<>();
 
@@ -446,15 +448,25 @@ public final class TtfTextRenderer {
 				: (alignLeft ? 2 : screenWidth - 2 - cardWidth) + Math.round(xOffset);
 		int y = columnPos != null ? Math.round(columnPos[1] * guiHeight / 1000.0F) : yStart;
 
+		float slide = xOffset;
+
 		for (Card card : cards) {
 			int height = CARD_PADDING * 2 + card.rows().size() * lineHeight;
-			drawCard(graphics, x, y, cardWidth, height, card.mods());
+			// A card that holds a pinned row stays put: the rows around it glide into the empty
+			// space, so the always-on row never jumps. Other cards travel with their rows.
+			boolean holdsPinned = card.rows().stream().anyMatch(pinned::contains);
+			int cardX = holdsPinned ? x : x + Math.round(slide);
+			drawCard(graphics, cardX, y, cardWidth, height, card.mods());
 
 			int maxKey = maxKeyWidth(card);
-			int valueColumn = x + CARD_PADDING + gutter() + (maxKey > 0 ? maxKey + KEY_GAP : 0);
 
 			for (int index = 0; index < card.rows().size(); index++) {
-				drawRow(graphics, card.rows().get(index), x, y + CARD_PADDING + index * lineHeight, valueColumn);
+				Row row = card.rows().get(index);
+				int rowX = pinned.contains(row) ? x : x + Math.round(slide);
+
+				// Pinned rows sit exactly on their slot; the rest arrive from the side.
+				drawRow(graphics, row, rowX, y + CARD_PADDING + index * lineHeight,
+						rowX + CARD_PADDING + gutter() + (maxKey > 0 ? maxKey + KEY_GAP : 0));
 			}
 
 			y += height + CARD_GAP;
@@ -485,6 +497,19 @@ public final class TtfTextRenderer {
 	 * <p>Only a row that the player actually moved is pinned — a row merely having a classifier key
 	 * is not enough, otherwise every un-moved row would be filtered out of the column and vanish.
 	 */
+	/** Identity set of the rows that must not move with the slide. */
+	private static java.util.Set<Row> alwaysOnSet(List<Row> rows) {
+		java.util.Set<Row> pinned = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+
+		for (Row row : rows) {
+			if (row != null && row.raw() != null && pinnedToOverlay(row.raw())) {
+				pinned.add(row);
+			}
+		}
+
+		return pinned;
+	}
+
 	/**
 	 * True when the row comes from an entry that is always on, i.e. it must stay put and must not be
 	 * animated in with the rest of the overlay.
