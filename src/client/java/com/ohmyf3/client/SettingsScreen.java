@@ -283,10 +283,44 @@ public final class SettingsScreen extends Screen {
 		List<Target> targets = new ArrayList<>(16);
 		OhMyF3Config config = OhMyF3Config.get();
 
-		targets.addAll(column(graphics, KEY_LEFT, "左列", MOCK_LEFT, config, true));
-		targets.addAll(column(graphics, KEY_RIGHT, "右列", MOCK_RIGHT, config, false));
+		targets.addAll(column(graphics, KEY_LEFT, "左列", rows(true, MOCK_LEFT), config, true));
+		targets.addAll(column(graphics, KEY_RIGHT, "右列", rows(false, MOCK_RIGHT), config, false));
 		targets.add(pie(graphics, config));
 		return targets;
+	}
+
+	/**
+	 * Rows to preview for a column: the live F3 content when it has been captured, otherwise the
+	 * sample set (so the editor still works before F3 was ever opened).
+	 *
+	 * <p>Keys come from the same classifier the overlay uses, so a row dragged here is the same row
+	 * that will move in the real overlay. Lines the classifier does not recognise fall back to their
+	 * index within the column.
+	 */
+	private List<MockRow> rows(boolean left, List<MockRow> fallback) {
+		List<String> live = TtfTextRenderer.lastLines(left);
+
+		if (live.isEmpty()) {
+			return fallback;
+		}
+
+		List<MockRow> rows = new ArrayList<>(live.size());
+
+		for (String line : live) {
+			if (line == null || line.isBlank()) {
+				continue;
+			}
+
+			String key = com.ohmyf3.font.EntryClassifier.classify(line).key();
+
+			if (key == null || key.isEmpty()) {
+				key = "#" + rows.size();
+			}
+
+			rows.add(new MockRow(key, line));
+		}
+
+		return rows;
 	}
 
 	private List<Target> column(GuiGraphicsExtractor graphics, String key, String label, List<MockRow> rows,

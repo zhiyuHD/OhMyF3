@@ -112,6 +112,10 @@ public final class TtfTextRenderer {
 	private static List<String> lastModRows = List.of();
 
 	/** Last drawn columns, replayed while the overlay slides out. */
+	/** Raw lines the overlay last drew, reused by the settings screen's layout editor. */
+	private static List<String> lastLeftLines = List.of();
+	private static List<String> lastRightLines = List.of();
+
 	private static List<Row> lastLeftRows = List.of();
 	private static List<Row> lastRightRows = List.of();
 	private static int lastLeftWidth;
@@ -220,6 +224,16 @@ public final class TtfTextRenderer {
 
 		if (!ready) {
 			return;
+		}
+
+		// Remember what the real overlay shows, so the layout editor can preview live content
+		// instead of sample data.
+		List<String> snapshot = lines == null ? List.of() : List.copyOf(lines);
+
+		if (alignLeft) {
+			lastLeftLines = snapshot;
+		} else {
+			lastRightLines = snapshot;
 		}
 
 		float poseScale = graphics.pose().m00();
@@ -690,6 +704,15 @@ public final class TtfTextRenderer {
 		}
 
 		rebuildAtlas(scale);
+	}
+
+	/**
+	 * The lines the overlay last drew for a column, or an empty list when F3 has not been open yet.
+	 *
+	 * <p>Used by the layout editor to render the real content rather than a sample.
+	 */
+	public static List<String> lastLines(boolean alignLeft) {
+		return alignLeft ? lastLeftLines : lastRightLines;
 	}
 
 	/** Width of {@code text} in GUI pixels, with the same metrics {@link #drawString} uses. */
