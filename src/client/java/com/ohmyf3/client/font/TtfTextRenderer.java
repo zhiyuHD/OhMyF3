@@ -334,6 +334,17 @@ public final class TtfTextRenderer {
 		boolean hasAnimated = lines.stream().anyMatch(line -> line != null && !line.isBlank() && !pinnedToOverlay(line));
 
 		if (split && !hasAnimated) {
+			// The game stopped sending the F3-only rows, but the close animation is still running:
+			// replay the cached complete column so it slides out instead of freezing.
+			if (slideOffset != 0.0F && !SlideStates.atRest()) {
+				List<Row> cached = alignLeft ? lastLeftRows : lastRightRows;
+
+				if (!cached.isEmpty()) {
+					drawColumn(graphics, cached, alignLeft, screenWidth, slideOffset, 2, alwaysOnSet(cached));
+					return;
+				}
+			}
+
 			// Closed: the game only hands us the always-on rows, so the full layout cannot be rebuilt
 			// from this frame. Draw them where they sat in the last complete layout — that is the slot
 			// the F3-only rows will glide into, and it is why the row does not move when they arrive.
@@ -347,7 +358,7 @@ public final class TtfTextRenderer {
 				List<String> single = List.of(line);
 				int width = previewWidth(single);
 				int x = columnAnchorX(graphics, alignLeft, width, screenWidth);
-				int y = slots.getOrDefault(line, 2);
+				int y = slots.getOrDefault(slotKey(line), 2);
 				drawPreview(graphics, single, x, y);
 			}
 
@@ -494,7 +505,7 @@ public final class TtfTextRenderer {
 				if (slide == 0.0F && row.raw() != null) {
 					// The complete layout: remember where each row lives so the always-on rows can be
 					// drawn at those exact slots while the overlay is closed.
-					(alignLeft ? SLOT_LEFT : SLOT_RIGHT).put(row.raw(), rowY);
+					(alignLeft ? SLOT_LEFT : SLOT_RIGHT).put(slotKey(row.raw()), rowY);
 				}
 			}
 
@@ -526,6 +537,17 @@ public final class TtfTextRenderer {
 	 * <p>Only a row that the player actually moved is pinned — a row merely having a classifier key
 	 * is not enough, otherwise every un-moved row would be filtered out of the column and vanish.
 	 */
+	/**
+	 * Key for a row's remembered slot.
+	 *
+	 * <p>The entry id is stable while the line's text is not (FPS, coordinates and memory all
+	 * change), so keying by text made the always-on row fall back to the top of the column.
+	 */
+	private static String slotKey(String line) {
+		net.minecraft.resources.Identifier owner = DebugEntryOrigin.ownerOf(line);
+		return owner != null ? owner.toString() : "line:" + line;
+	}
+
 	/** X where a column's card starts, honouring a dragged position. */
 	private static int columnAnchorX(GuiGraphicsExtractor graphics, boolean alignLeft, int width, int screenWidth) {
 		int[] stored = OhMyF3Config.get().position(alignLeft ? "column_left" : "column_right");
