@@ -232,11 +232,25 @@ public final class SettingsScreen extends Screen {
 		// capturing.
 		TtfTextRenderer.requestCapture();
 
+		// The overlay skips its whole extraction while it is not marked visible, which is the state
+		// it is in whenever a screen is open - hence "you had to press F3 first". Flip it on for the
+		// duration of the capture only.
+		com.ohmyf3.client.DebugEntryOrigin.beginFrame();
+		boolean overlayVisible = Minecraft.getInstance().debugEntries.isOverlayVisible();
+
+		if (!overlayVisible) {
+			Minecraft.getInstance().debugEntries.setOverlayVisible(true);
+		}
+
 		try {
 			Minecraft.getInstance().getDebugOverlay().extractRenderState(graphics);
 		} catch (Throwable throwable) {
 			// The dummy overlay must never take the settings screen down with it.
 			com.ohmyf3.OhMyF3.LOGGER.warn("F3 capture failed; falling back to sample rows", throwable);
+		} finally {
+			if (!overlayVisible) {
+				Minecraft.getInstance().debugEntries.setOverlayVisible(false);
+			}
 		}
 
 		List<Target> targets = targets(graphics);
@@ -317,19 +331,24 @@ public final class SettingsScreen extends Screen {
 		}
 
 		List<MockRow> rows = new ArrayList<>(live.size());
+		java.util.Map<String, Integer> seen = new java.util.HashMap<>();
 
 		for (String line : live) {
 			if (line == null || line.isBlank()) {
 				continue;
 			}
 
-			String key = com.ohmyf3.font.EntryClassifier.classify(line).key();
+			String base = com.ohmyf3.font.EntryClassifier.classify(line).key();
 
-			if (key == null || key.isEmpty()) {
-				key = "#" + rows.size();
+			if (base == null || base.isEmpty()) {
+				rows.add(new MockRow("#" + rows.size(), line));
+				continue;
 			}
 
-			rows.add(new MockRow(key, line));
+			// Same category can appear several times (every Sodium line is "sodium"); number the
+			// occurrences so dragging one row moves exactly that row.
+			int occurrence = seen.merge(base, 1, Integer::sum) - 1;
+			rows.add(new MockRow(base + "#" + occurrence, line));
 		}
 
 		return rows;
@@ -338,63 +357,66 @@ public final class SettingsScreen extends Screen {
 	private List<Target> column(GuiGraphicsExtractor graphics, String key, String label, List<MockRow> rows,
 			OhMyF3Config config, boolean left) {
 		List<Target> targets = new ArrayList<>();
-		List<MockRow> flowing = new ArrayList<>(rows);
+		List<String> flowing = new ArrayList<>();
 		List<MockRow> pinned = new ArrayList<>();
 
 		// Pinned rows are drawn on their own, exactly like the real overlay does.
 		for (MockRow row : rows) {
 			if (config.position("row:" + row.key()) != null) {
-				flowing.remove(row);
 				pinned.add(row);
+			} else {
+				flowing.add(row.line());
 			}
 		}
 
-		List<String> visible = new ArrayList<>(flowing.size());
-
-		for (MockRow row : flowing) {
-			visible.add(row.line());
-		}
-
-		int width = Math.max(60, TtfTextRenderer.previewWidth(visible));
-		int height = TtfTextRenderer.previewHeight(visible);
 		// Anchor the default like the overlay does: the right column is pinned to the real card's
-		// width. That width is 0 until the overlay has drawn once, so fall back to the sample card —
-		// using it directly pushed the whole column past the right edge of the screen.
+		// width. That width is 0 until the overlay has drawn once, so fall back to the sample card.
 		int anchorWidth = TtfTextRenderer.lastCardWidth(left);
 
 		if (anchorWidth <= 0) {
-			anchorWidth = Math.max(60, width);
+			anchorWidth = Math.max(60, TtfTextRenderer.previewWidth(flowing));
 		}
 
-		int defaultX = left ? 2 : this.width - 2 - anchorWidth;
 		int[] stored = config.position(key);
-		int x = stored != null ? Math.round(stored[0] * this.width / 1000.0F) : defaultX;
+		int x = stored != null ? Math.round(stored[0] * this.width / 1000.0F) : left ? 2 : this.width - 2 - anchorWidth;
 		int y = stored != null ? Math.round(stored[1] * this.height / 1000.0F) : 2;
 
-		// Grab bar: above the card normally, below it when the card is at the top edge (the default
-		// anchor is y = 2, which would push a bar at y - 14 off-screen).
-		int grabWidth = Math.min(width, 60);
-		int grabY = y - 14 >= 0 ? y - 14 : y + height + 2;
+		// Draw with the overlay's own grouping (cards split at blank lines) and collect the row rects
+		// it produced, so the drag boxes sit exactly on the rows.
+		List<TtfTextRenderer.PreviewRow> drawn = TtfTextRenderer.drawPreviewColumn(graphics, flowing, x, y);
+
+		java.util.Map<String, Integer> seen = new java.util.HashMap<>();
+
+		for (TtfTextRenderer.PreviewRow row : drawn) {
+			String base = com.ohmyf3.font.EntryClassifier.classify(row.raw()).key();
+
+			if (base == null || base.isEmpty()) {
+				base = "#" + seen.size();
+			} else {
+				base = base + "#" + (seen.merge(base, 1, Integer::sum) - 1);
+			}
+
+			targets.add(new Target("row:" + base, "行", x, row.y(), anchorWidth, row.height()));
+		}
+
+		// Grab bar: above the card normally, below it when the column sits at the top edge.
+		int bottom = drawn.isEmpty() ? y : drawn.get(drawn.size() - 1).y() + drawn.get(drawn.size() - 1).height() + 6;
+		int grabWidth = Math.min(anchorWidth, 60);
+		int grabY = y - 14 >= 0 ? y - 14 : bottom;
 		Shapes.filled(graphics, x, grabY, grabWidth, 12, 6, M3.SURFACE_CONTAINER_HIGHEST);
 		TtfTextRenderer.drawString(graphics, label, x + 6, grabY + 10, M3.ON_SURFACE_VARIANT_BRIGHT);
-		TtfTextRenderer.drawPreview(graphics, visible, x, y);
-
 		targets.add(new Target(key, label, x, grabY, grabWidth, 12));
-
-		for (int index = 0; index < flowing.size(); index++) {
-			int rowY = y + 3 + index * TtfTextRenderer.lineHeight();
-			targets.add(new Target("row:" + flowing.get(index).key(), "行", x, rowY, width,
-					TtfTextRenderer.lineHeight()));
-		}
 
 		for (MockRow row : pinned) {
 			int[] position = config.position("row:" + row.key());
 			int pinnedX = Math.round(position[0] * this.width / 1000.0F);
 			int pinnedY = Math.round(position[1] * this.height / 1000.0F);
-			int pinnedWidth = Math.max(60, TtfTextRenderer.previewWidth(List.of(row.line())));
-			TtfTextRenderer.drawPreview(graphics, List.of(row.line()), pinnedX, pinnedY);
-			targets.add(new Target("row:" + row.key(), "行", pinnedX, pinnedY, pinnedWidth,
-					TtfTextRenderer.previewHeight(List.of(row.line()))));
+			List<TtfTextRenderer.PreviewRow> single = TtfTextRenderer.drawPreviewColumn(graphics,
+					List.of(row.line()), pinnedX, pinnedY);
+
+			int height = single.isEmpty() ? TtfTextRenderer.lineHeight() : single.get(0).height();
+			targets.add(new Target("row:" + row.key(), "行", pinnedX,
+					single.isEmpty() ? pinnedY : single.get(0).y(), anchorWidth, height));
 		}
 
 		return targets;

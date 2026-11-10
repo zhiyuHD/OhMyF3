@@ -303,10 +303,15 @@ public final class TtfTextRenderer {
 		List<Card> cards = new ArrayList<>();
 		List<Row> current = new ArrayList<>();
 
+		// Positions are stored per row occurrence, so two lines of the same category (every Sodium
+		// line classifies as "sodium") stay independent.
+		List<String> rowKeys = rowKeys(rows);
+
 		// Rows the player dragged out of the column are drawn as standalone cards first, and are
 		// excluded from the flow below so the column closes up behind them.
-		for (Row row : rows) {
-			int[] position = pinnedPosition(row);
+		for (int rowIndex = 0; rowIndex < rows.size(); rowIndex++) {
+			Row row = rows.get(rowIndex);
+			int[] position = pinnedPosition(rowKeys.get(rowIndex));
 
 			if (position == null) {
 				continue;
@@ -324,8 +329,10 @@ public final class TtfTextRenderer {
 		}
 
 		// Vanilla rows keep their blank-line grouping; mod rows are collected into one card.
-		for (Row row : rows) {
-			if (!row.vanilla() || pinnedPosition(row) != null) {
+		for (int rowIndex = 0; rowIndex < rows.size(); rowIndex++) {
+			Row row = rows.get(rowIndex);
+
+			if (!row.vanilla() || pinnedPosition(rowKeys.get(rowIndex)) != null) {
 				continue;
 			}
 
@@ -347,8 +354,10 @@ public final class TtfTextRenderer {
 
 		List<Row> mods = new ArrayList<>();
 
-		for (Row row : rows) {
-			if (!row.vanilla() && hasContent(row) && pinnedPosition(row) == null) {
+		for (int rowIndex = 0; rowIndex < rows.size(); rowIndex++) {
+			Row row = rows.get(rowIndex);
+
+			if (!row.vanilla() && hasContent(row) && pinnedPosition(rowKeys.get(rowIndex)) == null) {
 				mods.add(row);
 			}
 		}
@@ -425,9 +434,108 @@ public final class TtfTextRenderer {
 	 * <p>Only a row that the player actually moved is pinned — a row merely having a classifier key
 	 * is not enough, otherwise every un-moved row would be filtered out of the column and vanish.
 	 */
-	private static int[] pinnedPosition(Row row) {
-		String key = pinnedKey(row);
+	private static int[] pinnedPosition(String key) {
 		return key == null ? null : OhMyF3Config.get().position(key);
+	}
+
+	/** Config keys for a column's rows, numbered by occurrence within their category. */
+	private static List<String> rowKeys(List<Row> rows) {
+		List<String> keys = new ArrayList<>(rows.size());
+		java.util.Map<String, Integer> seen = new java.util.HashMap<>();
+
+		for (Row row : rows) {
+			String base = pinnedKey(row);
+
+			if (base == null) {
+				keys.add(null);
+				continue;
+			}
+
+			int occurrence = seen.merge(base, 1, Integer::sum) - 1;
+			keys.add(base + "#" + occurrence);
+		}
+
+		return keys;
+	}
+
+	/**
+	 * One row drawn by {@link #drawPreviewColumn}, for hit-testing in the layout editor.
+	 *
+	 * @param raw the original debug line, used to derive the row's key
+	 */
+	public record PreviewRow(String raw, int y, int height) {
+	}
+
+	/**
+	 * Draws a column exactly like the overlay does — split into cards at blank lines, with the same
+	 * paddings and gaps — and returns the row rects so the editor can hit-test them.
+	 *
+	 * <p>Using the real grouping matters: a single-card preview does not look like F3, and the row
+	 * boxes would not line up with the cards actually drawn.
+	 */
+	public static List<PreviewRow> drawPreviewColumn(GuiGraphicsExtractor graphics, List<String> lines, int x,
+			int y) {
+		if (!ready || lines == null || lines.isEmpty()) {
+			return List.of();
+		}
+
+		List<Row> rows = new ArrayList<>(lines.size());
+
+		for (String line : lines) {
+			rows.add(line == null || line.isEmpty() ? Row.EMPTY : layout(line));
+		}
+
+		List<Card> cards = new ArrayList<>();
+		List<Row> current = new ArrayList<>();
+
+		for (Row row : rows) {
+			if (!hasContent(row)) {
+				if (!current.isEmpty()) {
+					cards.add(new Card(current, false));
+					current = new ArrayList<>();
+				}
+
+				continue;
+			}
+
+			current.add(row);
+		}
+
+		if (!current.isEmpty()) {
+			cards.add(new Card(current, false));
+		}
+
+		if (cards.isEmpty()) {
+			return List.of();
+		}
+
+		int width = 0;
+
+		for (Card card : cards) {
+			width = Math.max(width, cardWidth(card));
+		}
+
+		List<PreviewRow> drawn = new ArrayList<>(rows.size());
+		int cursorY = y;
+
+		for (Card card : cards) {
+			int height = CARD_PADDING * 2 + card.rows().size() * lineHeight;
+			drawCard(graphics, x, cursorY, width, height, card.mods());
+
+			int maxKey = maxKeyWidth(card);
+			int valueColumn = x + CARD_PADDING + gutter() + (maxKey > 0 ? maxKey + KEY_GAP : 0);
+
+			for (int index = 0; index < card.rows().size(); index++) {
+				Row row = card.rows().get(index);
+				int rowY = cursorY + CARD_PADDING + index * lineHeight;
+				drawRow(graphics, row, x, rowY, valueColumn);
+				drawn.add(new PreviewRow(row.raw(), rowY, lineHeight));
+			}
+
+			cursorY += height + CARD_GAP;
+		}
+
+		return drawn;
 	}
 
 	/**
