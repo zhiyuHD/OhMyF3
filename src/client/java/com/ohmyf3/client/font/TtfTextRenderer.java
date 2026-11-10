@@ -138,6 +138,10 @@ public final class TtfTextRenderer {
 	private static List<Row> lastRightRows = List.of();
 	private static int lastLeftWidth;
 	private static int lastRightWidth;
+	/** Remembered y slot of each row in the last fully-open layout, per column. */
+	private static final java.util.Map<String, Integer> SLOT_LEFT = new java.util.HashMap<>();
+	private static final java.util.Map<String, Integer> SLOT_RIGHT = new java.util.HashMap<>();
+
 	private static int lastLeftCardWidth;
 	private static int lastRightCardWidth;
 	private static float lastPoseScale = 1.0F;
@@ -327,12 +331,30 @@ public final class TtfTextRenderer {
 			lastRightWidth = screenWidth;
 		}
 
-		if (split) {
-			// One pass over the full layout: pinned rows keep their slot, everything else slides.
-			drawColumn(graphics, rows, alignLeft, screenWidth, slideOffset, 2, alwaysOnSet(rows));
-		} else {
-			drawColumn(graphics, rows, alignLeft, screenWidth, slideOffset, 2);
+		boolean hasAnimated = lines.stream().anyMatch(line -> line != null && !line.isBlank() && !pinnedToOverlay(line));
+
+		if (split && !hasAnimated) {
+			// Closed: the game only hands us the always-on rows, so the full layout cannot be rebuilt
+			// from this frame. Draw them where they sat in the last complete layout — that is the slot
+			// the F3-only rows will glide into, and it is why the row does not move when they arrive.
+			java.util.Map<String, Integer> slots = alignLeft ? SLOT_LEFT : SLOT_RIGHT;
+
+			for (String line : lines) {
+				if (!pinnedToOverlay(line)) {
+					continue;
+				}
+
+				List<String> single = List.of(line);
+				int width = previewWidth(single);
+				int x = columnAnchorX(graphics, alignLeft, width, screenWidth);
+				int y = slots.getOrDefault(line, 2);
+				drawPreview(graphics, single, x, y);
+			}
+
+			return;
 		}
+
+		drawColumn(graphics, rows, alignLeft, screenWidth, slideOffset, 2);
 	}
 
 	// ---------------------------------------------------------------- cards
@@ -465,8 +487,15 @@ public final class TtfTextRenderer {
 				int rowX = pinned.contains(row) ? x : x + Math.round(slide);
 
 				// Pinned rows sit exactly on their slot; the rest arrive from the side.
-				drawRow(graphics, row, rowX, y + CARD_PADDING + index * lineHeight,
+				int rowY = y + CARD_PADDING + index * lineHeight;
+				drawRow(graphics, row, rowX, rowY,
 						rowX + CARD_PADDING + gutter() + (maxKey > 0 ? maxKey + KEY_GAP : 0));
+
+				if (slide == 0.0F && row.raw() != null) {
+					// The complete layout: remember where each row lives so the always-on rows can be
+					// drawn at those exact slots while the overlay is closed.
+					(alignLeft ? SLOT_LEFT : SLOT_RIGHT).put(row.raw(), rowY);
+				}
 			}
 
 			y += height + CARD_GAP;
@@ -497,6 +526,17 @@ public final class TtfTextRenderer {
 	 * <p>Only a row that the player actually moved is pinned — a row merely having a classifier key
 	 * is not enough, otherwise every un-moved row would be filtered out of the column and vanish.
 	 */
+	/** X where a column's card starts, honouring a dragged position. */
+	private static int columnAnchorX(GuiGraphicsExtractor graphics, boolean alignLeft, int width, int screenWidth) {
+		int[] stored = OhMyF3Config.get().position(alignLeft ? "column_left" : "column_right");
+
+		if (stored != null) {
+			return Math.round(stored[0] * screenWidth / 1000.0F);
+		}
+
+		return alignLeft ? 2 : screenWidth - 2 - width;
+	}
+
 	/** Identity set of the rows that must not move with the slide. */
 	private static java.util.Set<Row> alwaysOnSet(List<Row> rows) {
 		java.util.Set<Row> pinned = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
