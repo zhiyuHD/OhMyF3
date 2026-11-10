@@ -45,17 +45,10 @@ public abstract class DebugScreenOverlayMixin {
 	private void ohmyf3$drawColumn(GuiGraphicsExtractor graphics, List<String> lines, boolean alignLeft,
 			int scaledScreenWidth, CallbackInfo ci) {
 		float offset = DebugOverlaySlide.offset();
-		boolean pushed = false;
-
-		if (offset > 0.0F) {
-			// The left column comes in from the left, the right column from the right.
-			float direction = alignLeft ? -1.0F : 1.0F;
-
-			Matrix3x2fStack pose = graphics.pose();
-			pose.pushMatrix();
-			pose.translate(direction * offset * TtfTextRenderer.travel(alignLeft), 0.0F);
-			pushed = true;
-		}
+		// The slide is applied per row inside the renderer, so rows that are always on can stay put
+		// while the F3-only ones glide in.
+		float direction = alignLeft ? -1.0F : 1.0F;
+		float slide = offset > 0.0F ? direction * offset * TtfTextRenderer.travel(alignLeft) : 0.0F;
 
 		if (TtfTextRenderer.isReady()) {
 			// User rows are appended to the left column so they read as part of the overlay.
@@ -67,22 +60,17 @@ public abstract class DebugScreenOverlayMixin {
 				// from the pose, so glyphs are baked at the zoomed size rather than stretched.
 				graphics.pose().pushMatrix();
 				graphics.pose().scale(scale, scale);
-				TtfTextRenderer.drawLines(graphics, content, alignLeft, Math.round(scaledScreenWidth / scale));
+				TtfTextRenderer.drawLines(graphics, content, alignLeft, Math.round(scaledScreenWidth / scale), slide);
 				graphics.pose().popMatrix();
 			} else {
-				TtfTextRenderer.drawLines(graphics, content, alignLeft, scaledScreenWidth);
-			}
-
-			// Cancelling skips the RETURN hook, so the pose must be restored here.
-			if (pushed) {
-				graphics.pose().popMatrix();
+				TtfTextRenderer.drawLines(graphics, content, alignLeft, scaledScreenWidth, slide);
 			}
 
 			ci.cancel();
 			return;
 		}
 
-		ohmyf3$posePushed = pushed;
+		ohmyf3$posePushed = false;
 	}
 
 	@Inject(method = "extractLines", at = @At("RETURN"))

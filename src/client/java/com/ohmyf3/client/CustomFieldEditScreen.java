@@ -46,6 +46,8 @@ public final class CustomFieldEditScreen extends Screen {
 
 	private Editing editing = Editing.NONE;
 	private String buffer = "";
+	/** Set when keyPressed already consumed this keystroke, so charTyped does not double-insert. */
+	private boolean keyConsumed;
 
 	public CustomFieldEditScreen(Screen parent, OhMyF3Config.CustomField field) {
 		super(Component.literal("编辑自定义项"));
@@ -211,6 +213,7 @@ public final class CustomFieldEditScreen extends Screen {
 
 		if (M3.inside(mouseX, mouseY, fieldX(), labelY(), fieldWidth(), FIELD_HEIGHT)) {
 			begin(Editing.LABEL, field.label);
+			com.ohmyf3.OhMyF3.LOGGER.info("DIAG edit focus=LABEL buffer={}", buffer);
 			return true;
 		}
 
@@ -274,6 +277,12 @@ public final class CustomFieldEditScreen extends Screen {
 			return super.charTyped(event);
 		}
 
+		// keyPressed may already have inserted this keystroke via the key map.
+		if (keyConsumed) {
+			keyConsumed = false;
+			return true;
+		}
+
 		String typed = event.codepointAsString();
 
 		if (typed.isEmpty()) {
@@ -299,6 +308,15 @@ public final class CustomFieldEditScreen extends Screen {
 		}
 
 		if (editing != Editing.NONE) {
+			String typed = com.ohmyf3.client.ui.TextKeys.character(key,
+					com.ohmyf3.client.ui.TextKeys.shift(event));
+
+			if (typed != null) {
+				buffer += typed;
+				keyConsumed = true;
+				return true;
+			}
+
 			if (key == 259) {
 				if (!buffer.isEmpty()) {
 					buffer = buffer.substring(0, buffer.offsetByCodePoints(buffer.length(), -1));

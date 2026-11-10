@@ -22,31 +22,37 @@ import net.minecraft.resources.Identifier;
 public final class DebugEntryOrigin {
 	private static final String VANILLA_NAMESPACE = "minecraft";
 
-	/** Namespace of the entry currently being displayed; set just before it emits lines. */
-	private static final ThreadLocal<String> CURRENT_NAMESPACE = new ThreadLocal<>();
+	/** Entry currently being displayed; set just before it emits lines. */
+	private static final ThreadLocal<Identifier> CURRENT_ENTRY = new ThreadLocal<>();
 
-	private static final Map<String, Boolean> MODDED = new IdentityHashMap<>();
+	/** Registered owner of each line (identity keyed, like the displayer's own strings). */
+	private static final Map<String, Identifier> OWNERS = new IdentityHashMap<>();
 
 	private DebugEntryOrigin() {
 	}
 
 	/** Clears per-frame state; called when the overlay starts assembling its columns. */
 	public static void beginFrame() {
-		MODDED.clear();
-		CURRENT_NAMESPACE.remove();
+		OWNERS.clear();
+		CURRENT_ENTRY.remove();
 	}
 
 	/** Remembers which entry is about to emit lines. */
 	public static void markEntry(Identifier id) {
-		CURRENT_NAMESPACE.set(id == null ? null : id.getNamespace());
+		CURRENT_ENTRY.set(id);
 	}
 
-	/** Tags a line with the namespace of the entry currently being displayed. */
-	public static void tag(String line) {
-		String namespace = CURRENT_NAMESPACE.get();
+	/** The entry that produced {@code line}, or {@code null} when it was synthesised. */
+	public static Identifier ownerOf(String line) {
+		return line == null ? null : OWNERS.get(line);
+	}
 
-		if (line != null && namespace != null) {
-			MODDED.put(line, !VANILLA_NAMESPACE.equals(namespace));
+	/** Tags a line with the entry currently being displayed. */
+	public static void tag(String line) {
+		Identifier entry = CURRENT_ENTRY.get();
+
+		if (line != null && entry != null) {
+			OWNERS.put(line, entry);
 		}
 	}
 
@@ -56,11 +62,9 @@ public final class DebugEntryOrigin {
 			return;
 		}
 
-		boolean modded = !VANILLA_NAMESPACE.equals(groupId.getNamespace());
-
 		for (String line : lines) {
 			if (line != null) {
-				MODDED.put(line, modded);
+				OWNERS.put(line, groupId);
 			}
 		}
 	}
@@ -68,7 +72,7 @@ public final class DebugEntryOrigin {
 	/** Tags a single line emitted into a named group. */
 	public static void tag(String line, Identifier groupId) {
 		if (line != null && groupId != null) {
-			MODDED.put(line, !VANILLA_NAMESPACE.equals(groupId.getNamespace()));
+			OWNERS.put(line, groupId);
 		}
 	}
 
@@ -79,6 +83,7 @@ public final class DebugEntryOrigin {
 	 *         synthesises itself)
 	 */
 	public static Boolean modded(String line) {
-		return line == null ? null : MODDED.get(line);
+		Identifier owner = ownerOf(line);
+		return owner == null ? null : !VANILLA_NAMESPACE.equals(owner.getNamespace());
 	}
 }

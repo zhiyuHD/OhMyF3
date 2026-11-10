@@ -49,6 +49,8 @@ public final class M3DebugOptionsScreen extends Screen {
 	private final List<Entry> filtered = new ArrayList<>();
 	private String query = "";
 	private boolean searchFocused;
+	/** Set when keyPressed already consumed this keystroke, so charTyped does not double-insert. */
+	private boolean keyConsumed;
 	private final List<Button> buttons = new ArrayList<>();
 
 	private int scroll;
@@ -477,6 +479,11 @@ public final class M3DebugOptionsScreen extends Screen {
 			return super.charTyped(event);
 		}
 
+		if (keyConsumed) {
+			keyConsumed = false;
+			return true;
+		}
+
 		String typed = event.codepointAsString();
 
 		if (typed.isEmpty() || !typed.chars().allMatch(c -> Character.isLetterOrDigit(c) || c == '_' || c == ':')) {
@@ -501,6 +508,18 @@ public final class M3DebugOptionsScreen extends Screen {
 
 			close();
 			return true;
+		}
+
+		if (searchFocused) {
+			String typed = com.ohmyf3.client.ui.TextKeys.character(key,
+					com.ohmyf3.client.ui.TextKeys.shift(event));
+
+			if (typed != null && typed.chars().allMatch(c -> Character.isLetterOrDigit(c) || c == '_' || c == ':')) {
+				query += typed;
+				rebuildFiltered();
+				keyConsumed = true;
+				return true;
+			}
 		}
 
 		if (searchFocused && (key == 259 || key == 261)) {

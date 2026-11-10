@@ -220,11 +220,11 @@ public final class TtfTextRenderer {
 		graphics.pose().scale(lastPoseScale, lastPoseScale);
 
 		if (!lastLeftRows.isEmpty()) {
-			drawColumn(graphics, lastLeftRows, true, lastLeftWidth, -offset * travel(true));
+			drawColumn(graphics, lastLeftRows, true, lastLeftWidth, -offset * travel(true), 2);
 		}
 
 		if (!lastRightRows.isEmpty()) {
-			drawColumn(graphics, lastRightRows, false, lastRightWidth, offset * travel(false));
+			drawColumn(graphics, lastRightRows, false, lastRightWidth, offset * travel(false), 2);
 		}
 
 		graphics.pose().popMatrix();
@@ -255,6 +255,18 @@ public final class TtfTextRenderer {
 
 	public static void drawLines(GuiGraphicsExtractor graphics, List<String> lines, boolean alignLeft,
 			int screenWidth) {
+		drawLines(graphics, lines, alignLeft, screenWidth, 0.0F);
+	}
+
+	/**
+	 * Draws a column, splitting rows that are always on from the ones that only appear with F3.
+	 *
+	 * <p>Always-on rows are pinned to their resting position and never animated; the rest start
+	 * {@code slideOffset} pixels to the side and glide in below them. Without the split, closing the
+	 * overlay would push the always-on rows off-screen with everything else.
+	 */
+	public static void drawLines(GuiGraphicsExtractor graphics, List<String> lines, boolean alignLeft,
+			int screenWidth, float slideOffset) {
 		ensureInitialised();
 
 		if (!ready) {
@@ -290,8 +302,17 @@ public final class TtfTextRenderer {
 		// whole frame before a single quad is emitted.
 		List<Row> rows = new ArrayList<>(lines.size());
 
+		boolean split = slideOffset != 0.0F && lines.stream().anyMatch(TtfTextRenderer::pinnedToOverlay);
+		List<Row> alwaysOn = new ArrayList<>();
+		List<Row> animated = new ArrayList<>();
+
 		for (String line : lines) {
-			rows.add(line == null || line.isEmpty() ? Row.EMPTY : layout(line));
+			Row row = line == null || line.isEmpty() ? Row.EMPTY : layout(line);
+			rows.add(row);
+
+			if (split) {
+				(pinnedToOverlay(line) ? alwaysOn : animated).add(row);
+			}
 		}
 
 		if (atlas.isDirty()) {
@@ -313,13 +334,21 @@ public final class TtfTextRenderer {
 			lastRightWidth = screenWidth;
 		}
 
-		drawColumn(graphics, rows, alignLeft, screenWidth, 0.0F);
+		if (split) {
+			int used = drawColumn(graphics, alwaysOn, alignLeft, screenWidth, 0.0F, 2);
+
+			if (!animated.isEmpty()) {
+				drawColumn(graphics, animated, alignLeft, screenWidth, slideOffset, 2 + used + CARD_GAP);
+			}
+		} else {
+			drawColumn(graphics, rows, alignLeft, screenWidth, 0.0F, 2);
+		}
 	}
 
 	// ---------------------------------------------------------------- cards
 
-	private static void drawColumn(GuiGraphicsExtractor graphics, List<Row> rows, boolean alignLeft,
-			int screenWidth, float xOffset) {
+	private static int drawColumn(GuiGraphicsExtractor graphics, List<Row> rows, boolean alignLeft,
+			int screenWidth, float xOffset, int yStart) {
 		List<Card> cards = new ArrayList<>();
 		List<Row> current = new ArrayList<>();
 
@@ -392,7 +421,7 @@ public final class TtfTextRenderer {
 		}
 
 		if (cards.isEmpty()) {
-			return;
+			return 0;
 		}
 
 		int widest = 0;
@@ -415,7 +444,7 @@ public final class TtfTextRenderer {
 		int guiHeight = graphics.guiHeight();
 		int x = columnPos != null ? Math.round(columnPos[0] * screenWidth / 1000.0F)
 				: (alignLeft ? 2 : screenWidth - 2 - cardWidth) + Math.round(xOffset);
-		int y = columnPos != null ? Math.round(columnPos[1] * guiHeight / 1000.0F) : 2;
+		int y = columnPos != null ? Math.round(columnPos[1] * guiHeight / 1000.0F) : yStart;
 
 		for (Card card : cards) {
 			int height = CARD_PADDING * 2 + card.rows().size() * lineHeight;
@@ -430,6 +459,8 @@ public final class TtfTextRenderer {
 
 			y += height + CARD_GAP;
 		}
+
+		return y - yStart;
 	}
 
 	/**
@@ -454,6 +485,17 @@ public final class TtfTextRenderer {
 	 * <p>Only a row that the player actually moved is pinned — a row merely having a classifier key
 	 * is not enough, otherwise every un-moved row would be filtered out of the column and vanish.
 	 */
+	/**
+	 * True when the row comes from an entry that is always on, i.e. it must stay put and must not be
+	 * animated in with the rest of the overlay.
+	 */
+	private static boolean pinnedToOverlay(String line) {
+		net.minecraft.resources.Identifier owner = DebugEntryOrigin.ownerOf(line);
+
+		return owner != null && Minecraft.getInstance().debugEntries.getStatus(owner)
+				== net.minecraft.client.gui.components.debug.DebugScreenEntryStatus.ALWAYS_ON;
+	}
+
 	private static int[] pinnedPosition(String key) {
 		return key == null ? null : OhMyF3Config.get().position(key);
 	}
