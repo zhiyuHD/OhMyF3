@@ -380,9 +380,11 @@ public final class TtfTextRenderer {
 					continue;
 				}
 
+				// Keep the card frame exactly where it was, so the other cells read as empty slots
+				// rather than the row floating on its own; only this row is filled in.
 				Row row = layout(line);
-				drawCard(graphics, slot[0], slot[1] - CARD_PADDING, slot[2], CARD_PADDING * 2 + lineHeight, false);
-				drawRow(graphics, row, slot[0], slot[1], slot[3]);
+				drawCard(graphics, slot[0], slot[1], slot[2], slot[3], false);
+				drawRow(graphics, row, slot[0], slot[4], slot[5]);
 			}
 
 			return;
@@ -535,8 +537,11 @@ public final class TtfTextRenderer {
 				if (slide == 0.0F && row.raw() != null) {
 					// The complete layout: remember where each row lives so the always-on rows can be
 					// drawn at those exact slots while the overlay is closed.
-					(alignLeft ? SLOT_LEFT : SLOT_RIGHT).put(slotKey(row.raw()),
-							new int[] {cardX, rowY, cardWidth, rowX + CARD_PADDING + gutter() + (maxKey > 0 ? maxKey + KEY_GAP : 0)});
+					// {cardX, cardTopY, cardWidth, cardHeight, rowY, valueColumnX}: the card frame and
+					// the row's cell, so the closed state can keep the frame with an empty slot.
+					int[] geometry = new int[] {cardX, y, cardWidth, height, rowY,
+							rowX + CARD_PADDING + gutter() + (maxKey > 0 ? maxKey + KEY_GAP : 0)};
+					(alignLeft ? SLOT_LEFT : SLOT_RIGHT).put(slotKey(row.raw()), geometry);
 
 					if (pinnedToOverlay(row.raw())) {
 						PINNED_ROWS.add(row);
