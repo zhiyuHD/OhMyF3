@@ -226,6 +226,11 @@ public final class TtfTextRenderer {
 		capturePending = true;
 	}
 
+	/** True while an extraction is only recording rows (the layout editor's capture pass). */
+	public static boolean isCapturing() {
+		return capturing;
+	}
+
 	public static void beginFrame() {
 		// A capture requested since the last frame turns this whole extraction into a read-only
 		// pass: the rows are recorded, nothing is drawn.

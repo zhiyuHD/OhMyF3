@@ -36,6 +36,7 @@ public abstract class DebugScreenOverlayMixin {
 
 	@Inject(method = "extractRenderState", at = @At("HEAD"))
 	private void ohmyf3$beginFrame(GuiGraphicsExtractor graphics, CallbackInfo ci) {
+
 		DebugEntryOrigin.beginFrame();
 		TtfTextRenderer.beginFrame();
 	}
@@ -43,6 +44,14 @@ public abstract class DebugScreenOverlayMixin {
 	@Inject(method = "extractLines", at = @At("HEAD"), cancellable = true)
 	private void ohmyf3$drawColumn(GuiGraphicsExtractor graphics, List<String> lines, boolean alignLeft,
 			int scaledScreenWidth, CallbackInfo ci) {
+		// A screen owns the display: drawing the overlay over it (and rebuilding the glyph atlas at
+		// the zoomed scale behind the screen's back) is what garbled the settings text. The capture
+		// pass is exempt because it deliberately runs while a screen is open.
+		if (!TtfTextRenderer.isCapturing() && net.minecraft.client.Minecraft.getInstance().gui.screen() != null) {
+			ci.cancel();
+			return;
+		}
+
 		float offset = DebugOverlaySlide.offset();
 		boolean pushed = false;
 

@@ -3,7 +3,6 @@ package com.ohmyf3.client;
 import java.util.List;
 
 import com.ohmyf3.client.font.TtfTextRenderer;
-import com.ohmyf3.client.ui.Anim;
 import com.ohmyf3.client.ui.M3;
 import com.ohmyf3.client.ui.Shapes;
 import com.ohmyf3.config.OhMyF3Config;
@@ -13,18 +12,15 @@ import com.ohmyf3.font.IconPainter;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 
 /**
- * Editor for the user-defined F3 rows.
+ * Lists the user-defined F3 rows; tapping one opens its dedicated editor.
  *
- * <p>Each row shows its icon, a label and the expression that produces the value. Tapping the icon
- * cycles the available ones, tapping the label or the expression starts inline editing, and the
- * footer adds or removes entries. Values are evaluated live by {@link Expression}, so the preview
- * under each expression is what the overlay will print.
+ * <p>The list only summarises (icon, label, expression, current value) — editing happens on
+ * {@link CustomFieldEditScreen}, which has room for the label, the expression and the icon grid.
  */
 public final class CustomFieldsScreen extends Screen {
 	private static final int LEFT_BUTTON = 1;
@@ -35,25 +31,17 @@ public final class CustomFieldsScreen extends Screen {
 	private static final int FOOTER_HEIGHT = 32;
 	private static final int ICON_SIZE = 30;
 
-	private enum Part {
-		LABEL, EXPRESSION
-	}
-
 	private record Button(String key, String label, int x, int y, int width, int height, boolean filled) {
 	}
 
 	private final Screen parent;
-	private final java.util.List<Button> buttons = new java.util.ArrayList<>();
+	private final List<Button> buttons = new java.util.ArrayList<>();
 
 	private int scroll;
-	private int editingIndex = -1;
-	private Part editingPart;
-	private String buffer = "";
 
 	public CustomFieldsScreen(Screen parent) {
 		super(Component.literal("自定义项"));
 		this.parent = parent;
-		Anim.seed("custom:open", 0.0F);
 	}
 
 	// ---------------------------------------------------------------- geometry
@@ -82,6 +70,14 @@ public final class CustomFieldsScreen extends Screen {
 		return Math.max(1, (listBottom() - listTop()) / (ROW_HEIGHT + ROW_GAP));
 	}
 
+	private int maxScroll() {
+		return Math.max(0, fields().size() - visibleRows());
+	}
+
+	private int rowY(int index) {
+		return listTop() + (index - scroll) * (ROW_HEIGHT + ROW_GAP);
+	}
+
 	private List<OhMyF3Config.CustomField> fields() {
 		OhMyF3Config config = OhMyF3Config.get();
 
@@ -90,14 +86,6 @@ public final class CustomFieldsScreen extends Screen {
 		}
 
 		return config.customFields;
-	}
-
-	private int maxScroll() {
-		return Math.max(0, fields().size() - visibleRows());
-	}
-
-	private int rowY(int index) {
-		return listTop() + (index - scroll) * (ROW_HEIGHT + ROW_GAP);
 	}
 
 	// ---------------------------------------------------------------- drawing
@@ -109,7 +97,7 @@ public final class CustomFieldsScreen extends Screen {
 		M3.panel(graphics, panelX(), panelY(), PANEL_WIDTH, panelHeight());
 
 		TtfTextRenderer.drawString(graphics, "自定义项", panelX() + PADDING, panelY() + PADDING + 10, M3.ON_SURFACE);
-		TtfTextRenderer.drawString(graphics, "点标签或表达式编辑 · 点图标切换", panelX() + PADDING, panelY() + PADDING + 24,
+		TtfTextRenderer.drawString(graphics, "点任意一项进入编辑", panelX() + PADDING, panelY() + PADDING + 24,
 				M3.ON_SURFACE_VARIANT_BRIGHT);
 
 		renderList(graphics, mouseX, mouseY);
@@ -128,7 +116,7 @@ public final class CustomFieldsScreen extends Screen {
 				continue;
 			}
 
-			renderRow(graphics, fields.get(i), i, y, mouseX, mouseY);
+			renderRow(graphics, fields.get(i), y, mouseX, mouseY);
 		}
 
 		graphics.disableScissor();
@@ -141,46 +129,26 @@ public final class CustomFieldsScreen extends Screen {
 		}
 	}
 
-	private void renderRow(GuiGraphicsExtractor graphics, OhMyF3Config.CustomField field, int index, int y,
-			int mouseX, int mouseY) {
+	private void renderRow(GuiGraphicsExtractor graphics, OhMyF3Config.CustomField field, int y, int mouseX,
+			int mouseY) {
 		int x = panelX() + PADDING;
 		int width = PANEL_WIDTH - PADDING * 2;
 		boolean hovered = M3.inside(mouseX, mouseY, x, y, width, ROW_HEIGHT);
 		Shapes.filled(graphics, x, y, width, ROW_HEIGHT, M3.RADIUS_LARGE,
 				hovered ? M3.SURFACE_CONTAINER_HIGHEST : M3.SURFACE_CONTAINER_HIGH);
 
-		// Icon chip; tapping cycles through the available icons.
 		int iconX = x + 12;
 		int iconY = y + (ROW_HEIGHT - ICON_SIZE) / 2;
-		boolean iconHovered = M3.inside(mouseX, mouseY, iconX, iconY, ICON_SIZE, ICON_SIZE);
-		Shapes.filled(graphics, iconX, iconY, ICON_SIZE, ICON_SIZE, 10,
-				iconHovered ? M3.PRIMARY_CONTAINER : M3.SURFACE_CONTAINER_HIGH);
-		TtfTextRenderer.drawIcon(graphics, iconOf(field), iconX + (ICON_SIZE - 10) / 2.0F,
-				iconY + (ICON_SIZE - 10) / 2.0F);
+		Shapes.filled(graphics, iconX, iconY, ICON_SIZE, ICON_SIZE, 10, M3.SURFACE_CONTAINER_HIGH);
+		TtfTextRenderer.drawIcon(graphics, iconOf(field), iconX + (ICON_SIZE - 10) / 2.0F, iconY + (ICON_SIZE - 10) / 2.0F);
 
-		String label = field.label == null ? "" : field.label;
-		String expression = field.expression == null ? "" : field.expression;
+		TtfTextRenderer.drawString(graphics, field.label == null ? "" : field.label, x + 54, y + 22, M3.ON_SURFACE);
+		TtfTextRenderer.drawString(graphics, field.expression == null ? "" : field.expression, x + 54, y + 38,
+				M3.ON_SURFACE_VARIANT_BRIGHT);
+		TtfTextRenderer.drawString(graphics, "= " + Expression.evaluate(field.expression), x + 54, y + 50, M3.OUTLINE);
 
-		boolean editingLabel = editingIndex == index && editingPart == Part.LABEL;
-		boolean editingExpression = editingIndex == index && editingPart == Part.EXPRESSION;
-
-		TtfTextRenderer.drawString(graphics, editingLabel ? buffer : label, x + 54, y + 22,
-				editingLabel ? M3.PRIMARY : M3.ON_SURFACE);
-
-		String preview = Expression.evaluate(expression);
-		TtfTextRenderer.drawString(graphics, editingExpression ? buffer : expression, x + 54, y + 38,
-				editingExpression ? M3.PRIMARY : M3.ON_SURFACE_VARIANT_BRIGHT);
-
-		TtfTextRenderer.drawString(graphics, "= " + preview, x + 54, y + 50, M3.OUTLINE);
-
-		// Delete button.
-		int deleteX = x + width - 34;
-		int deleteY = y + (ROW_HEIGHT - 20) / 2;
-		boolean deleteHovered = M3.inside(mouseX, mouseY, deleteX, deleteY, 20, 20);
-		Shapes.filled(graphics, deleteX, deleteY, 20, 20, 10,
-				deleteHovered ? M3.SURFACE_CONTAINER_HIGHEST : M3.SURFACE_CONTAINER_HIGH);
-		TtfTextRenderer.drawString(graphics, "×", deleteX + 8, deleteY + 15,
-				deleteHovered ? M3.OUTLINE : M3.ON_SURFACE_VARIANT_BRIGHT);
+		TtfTextRenderer.drawString(graphics, ">", x + width - 22, y + 32,
+				hovered ? M3.PRIMARY : M3.OUTLINE);
 	}
 
 	private void renderFooter(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
@@ -201,8 +169,6 @@ public final class CustomFieldsScreen extends Screen {
 				M3.textButton(graphics, button.x(), button.y(), button.width(), button.height(), button.label(),
 						hovered);
 			}
-
-			M3.drawRipple(graphics, "btn:" + button.key(), button.x(), button.y(), button.width(), button.height());
 		}
 	}
 
@@ -227,7 +193,6 @@ public final class CustomFieldsScreen extends Screen {
 
 		for (Button button : buttons) {
 			if (M3.inside(mouseX, mouseY, button.x(), button.y(), button.width(), button.height())) {
-				M3.ripple("btn:" + button.key(), mouseX, mouseY);
 				onButton(button.key());
 				return true;
 			}
@@ -244,78 +209,23 @@ public final class CustomFieldsScreen extends Screen {
 				continue;
 			}
 
-			OhMyF3Config.CustomField field = fields.get(i);
-
-			if (M3.inside(mouseX, mouseY, x + 12, y + (ROW_HEIGHT - ICON_SIZE) / 2, ICON_SIZE, ICON_SIZE)) {
-				cycleIcon(field);
-				return true;
-			}
-
-			if (M3.inside(mouseX, mouseY, x + width - 34, y + (ROW_HEIGHT - 20) / 2, 20, 20)) {
-				fields.remove(i);
-				OhMyF3Config.get().save();
-				return true;
-			}
-
-			if (M3.inside(mouseX, mouseY, x + 54, y + 8, width - 100, 18)) {
-				startEditing(i, Part.LABEL, field.label);
-				return true;
-			}
-
-			if (M3.inside(mouseX, mouseY, x + 54, y + 24, width - 100, 18)) {
-				startEditing(i, Part.EXPRESSION, field.expression);
+			if (M3.inside(mouseX, mouseY, x, y, width, ROW_HEIGHT)) {
+				Minecraft.getInstance().setScreenAndShow(new CustomFieldEditScreen(this, fields.get(i)));
 				return true;
 			}
 		}
 
-		commitEditing();
 		return super.mouseClicked(event, quickMove);
-	}
-
-	private void startEditing(int index, Part part, String current) {
-		commitEditing();
-		editingIndex = index;
-		editingPart = part;
-		buffer = current == null ? "" : current;
-	}
-
-	private void commitEditing() {
-		if (editingIndex < 0) {
-			return;
-		}
-
-		List<OhMyF3Config.CustomField> fields = fields();
-
-		if (editingIndex < fields.size()) {
-			OhMyF3Config.CustomField field = fields.get(editingIndex);
-
-			if (editingPart == Part.LABEL) {
-				field.label = buffer;
-			} else {
-				field.expression = buffer;
-			}
-
-			OhMyF3Config.get().save();
-		}
-
-		editingIndex = -1;
-		editingPart = null;
-	}
-
-	private void cycleIcon(OhMyF3Config.CustomField field) {
-		IconPainter.Icon[] icons = IconPainter.Icon.values();
-		IconPainter.Icon current = iconOf(field);
-		field.icon = icons[(current.ordinal() + 1) % icons.length].name();
-		OhMyF3Config.get().save();
 	}
 
 	private void onButton(String key) {
 		switch (key) {
 			case "done" -> close();
 			case "add" -> {
-				commitEditing();
-				fields().add(new OhMyF3Config.CustomField("时间", "CLOCK", "time()"));
+				OhMyF3Config.CustomField field = new OhMyF3Config.CustomField("时间", "CLOCK", "time('HH:mm:ss')");
+				fields().add(field);
 				OhMyF3Config.get().save();
+				Minecraft.getInstance().setScreenAndShow(new CustomFieldEditScreen(this, field));
 			}
 			default -> {
 			}
@@ -323,50 +233,9 @@ public final class CustomFieldsScreen extends Screen {
 	}
 
 	@Override
-	public boolean charTyped(CharacterEvent event) {
-		if (editingIndex < 0) {
-			return super.charTyped(event);
-		}
-
-		String typed = event.codepointAsString();
-
-		if (typed.isEmpty()) {
-			return false;
-		}
-
-		buffer += typed;
-		return true;
-	}
-
-	@Override
 	public boolean keyPressed(KeyEvent event) {
-		int key = event.input();
-
-		if (key == 256) {
-			if (editingIndex >= 0) {
-				editingIndex = -1;
-				editingPart = null;
-				return true;
-			}
-
+		if (event.input() == 256) {
 			close();
-			return true;
-		}
-
-		if (editingIndex >= 0) {
-			if (key == 259) {
-				if (!buffer.isEmpty()) {
-					buffer = buffer.substring(0, buffer.offsetByCodePoints(buffer.length(), -1));
-				}
-
-				return true;
-			}
-
-			if (key == 257 || key == 335) {
-				commitEditing();
-				return true;
-			}
-
 			return true;
 		}
 
@@ -384,7 +253,6 @@ public final class CustomFieldsScreen extends Screen {
 	}
 
 	private void close() {
-		commitEditing();
 		Minecraft.getInstance().setScreenAndShow(parent);
 	}
 
